@@ -6,11 +6,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+Pre-launch hardening pass.
+
+### Security
+
+- The Bitwarden session token no longer reaches a command line when it is stored: the macOS Keychain write goes through `security -i` (commands on stdin) instead of `security add-generic-password -w "$token"`, whose argument any process can read with `ps`.
+- Deny rules for the direct routes to that token — `security find-generic-password`, `dump-keychain`, `security export`, reads of `~/Library/Keychains`, `bw unlock`, `secrets-unlock --export`.
+- The unattended `daily-note` job is constrained rather than trusted: `--allowedTools` limits it to `Read,Edit,Write,Glob,Grep` plus `git status`/`add`/`commit`, and `~/vault` is its working directory. It is the only job that runs Claude with nobody watching.
+- `archive-push --delete-local` asks before each `rm -rf`, through `sm_confirm`, which answers no when there is no terminal. `--yes` carries an answer already given; `/archive` passes it only after the user has.
+- The `map-check` job writes its report to a `mktemp` file instead of a fixed `/tmp/sm-map-check.txt`.
+
+### Fixed
+
+- `setup-tools.sh` and `new-app` set `fail=1` inside loops on the right of a pipe, where the subshell threw it away and both scripts exited 0 after a failed step. They read from process substitutions now.
+- `new-app` ran the Tauri scaffolder in the caller's directory rather than the parent it was asked for, and a trailing `[ -d … ] && …` under `set -e` could exit 1 with no message.
+- `setup-tools.sh` matched comment lines with `\s`, which BSD grep does not support.
+- `/setup` installs `jq` in phase 4, before linking the hooks — every hook parses its stdin with `jq`, and `brew bundle` is two phases later.
+- Scaffold placeholders are `__NAME__`, not `{{name}}`, which collided with just's own `{{…}}` interpolation in `templates/cli/justfile`.
+- Three dead locals and an f-string with no placeholders in `docs/diagrams/render.py`; the rendered SVGs are unchanged.
+
+### Added
+
+- `camera-ingest` reads `SM_CAMERA_EXTS`, defaulting to RAF CR2 CR3 NEF ARW DNG ORF RW2 MOV MP4, instead of hard-coding one body's `RAF`/`MOV`.
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), `SECURITY.md`, issue forms for bugs and for `/setup`, a pull request template, and `.github/workflows/ci.yml` — shellcheck, `bash -n`, `--help`, JSON and YAML validation, and ruff. `ruff.toml` records which style rules this codebase breaks on purpose.
+- README: honest prerequisites (a recent macOS, Apple silicon versus Intel, running the `brew shellenv` lines the Homebrew installer prints, a fallback for `gh` without `--template`), and a "What this does not protect against" paragraph under Trust.
+- The missing rows in the `CLAUDE.md` "Where things are" table: `lib/`, `setup-tools.sh`, `.githooks/`, `docs/SECRETS.md`, `docs/TEMPLATE-DECISIONS.md`, `CHANGELOG.md`, `UPSTREAM`.
+
 ## [0.1.0] — 2026-09-16
 
 First public release.
 
 ### Added
+
 - Repo layout: root brain (`CLAUDE.md`), `TASKS.md`, `claude-global/`, layered Brewfiles, dotfiles, `macos-defaults.sh`, `templates/`, `docs/`.
 - Tier 1 scripts: `secrets-unlock`, `tg-send`, `tasks-sync`, `map-check`, `security-check`, `wt`.
 - Service wrappers: `tavily`, `firecrawl`, `jina`, `exa`; Google wrappers `gcal`, `gmail`, `gdrive`.
