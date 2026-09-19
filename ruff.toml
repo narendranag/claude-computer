@@ -1,0 +1,14 @@
+# Lint settings for the Python in this repo: lib/, docs/diagrams/, and the bin/ scripts
+# whose shebang is `uv run --script` (those have no .py extension, so CI passes them by name).
+#
+# Projects scaffolded by bin/new-app get their own config from their stack's template; this
+# file governs the template itself.
+
+line-length = 120
+
+[lint]
+# E501  long lines — the scripts here carry prose in comments and SVG strings, and wrapping
+#       them costs more than it explains. line-length above still guides `ruff format`.
+# E702  `a(); b()` — deliberate in docs/diagrams/render.py, where one line draws one glyph.
+# E741  a loop variable called `l` for a line of text. Legible in context.
+ignore = ["E501", "E702", "E741"]

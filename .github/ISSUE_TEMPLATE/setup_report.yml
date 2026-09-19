@@ -1,0 +1,93 @@
+name: Setup report
+description: /setup failed, stalled, or asked for something that wasn't there
+labels: ["setup"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `/setup` is the hardest part of this repo to test, because it only really runs on a
+        machine nobody has set up yet. Reports of it failing are the most useful thing you
+        can send — including the boring ones ("phase 6 asked for a password and I didn't
+        know which").
+
+        Scrub before pasting: no API keys, session tokens, real hostnames, Tailscale names,
+        email addresses or paths under your real home directory.
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: "`sw_vers -productVersion`"
+      placeholder: "15.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Chip
+      options:
+        - Apple silicon
+        - Intel
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Which phase failed
+      description: The numbered phases in claude-global/commands/setup.md.
+      options:
+        - "0 — Where are we (paths, git identity, gitleaks, template → instance)"
+        - "1 — Identity (host, hardware, machine file, FLEET.md)"
+        - "2 — SSH key and GitHub"
+        - "3 — Tailscale"
+        - "4 — Global Claude config (linking ~/.claude, hooks)"
+        - "5 — Bitwarden"
+        - "6 — Environment (Brewfiles, dotfiles, setup-tools.sh, MacParakeet, macos-defaults)"
+        - "7 — Protection (firewall, FileVault, Time Machine)"
+        - "8 — Verify and record (map-check, security-check)"
+        - "Before phase 0 — the four commands in Terminal"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you were asked to do, what you did, and where it stopped.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The failing command and its output. Scrubbed.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: fresh
+    attributes:
+      label: Was this a fresh machine?
+      options:
+        - Fresh Mac, nothing installed
+        - Existing Mac with Homebrew and other tools already on it
+        - Second machine joining an existing fleet
+        - Rebuild of a machine already in the map
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you did next
+      description: If you got past it, say how — that is usually the fix.
+
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have removed keys, tokens, real hostnames, email addresses and personal paths from everything above.
+          required: true

@@ -1,0 +1,78 @@
+name: Bug report
+description: A script, hook, slash command or template that does the wrong thing
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you paste anything: this repo's whole job is handling secrets and machine
+        details. Check your output for API keys, session tokens, real hostnames, Tailscale
+        names, email addresses and paths under your real home directory. Replace them —
+        `example-laptop`, `you@example.com`, `~/…` — rather than trusting redaction.
+
+        If the problem is a security weakness rather than a bug, stop here and use a
+        private advisory instead: see SECURITY.md.
+
+  - type: input
+    id: what
+    attributes:
+      label: What broke
+      description: The script, hook, command or template file, and what it did instead.
+      placeholder: "bin/camera-ingest files everything under today's date instead of the capture date"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The exact command, and what you expected.
+      placeholder: |
+        1. SM_CAMERA_EXTS="NEF" camera-ingest /Volumes/Untitled test-shoot --dry-run
+        2. Expected …
+        3. Got …
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The error, or the surrounding lines of it. Scrubbed.
+      render: text
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: "`sw_vers -productVersion`"
+      placeholder: "15.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Chip
+      options:
+        - Apple silicon
+        - Intel
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Template version
+      description: The tag or commit you are on — `git describe --tags --always`.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have removed keys, tokens, real hostnames, email addresses and personal paths from everything above.
+          required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/narendranag/ai-first-machine-setup/security/advisories/new
+    about: Never in a public issue. Use a private security advisory instead — see SECURITY.md.
+  - name: Ask a question or suggest an idea
+    url: https://github.com/narendranag/ai-first-machine-setup/discussions
+    about: "\"Has anyone done X?\", \"why is it built this way?\", and anything that isn't yet a bug."

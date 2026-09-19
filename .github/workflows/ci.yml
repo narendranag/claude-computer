@@ -1,0 +1,105 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # Not every bin/ script is bash: some are Python behind a `uv run --script` shebang,
+      # and neither has a file extension. Sort them by shebang so a new script needs no
+      # wiring here, and fail loudly if the lists come back empty rather than passing.
+      - name: List the scripts
+        id: list
+        run: |
+          set -euo pipefail
+          : > shell-scripts.txt
+          : > python-scripts.txt
+          for f in bin/* lib/*.sh ./*.sh .githooks/* claude-global/hooks/*.sh; do
+            [ -f "$f" ] || continue
+            case "$(head -1 -- "$f")" in
+              *bash*|*' sh'|*/sh)     echo "$f" >> shell-scripts.txt ;;
+              *python*|*'uv run'*)    echo "$f" >> python-scripts.txt ;;
+              *) case "$f" in *.sh) echo "$f" >> shell-scripts.txt ;; esac ;;
+            esac
+          done
+          # lib/common.sh is sourced, not run, so it has no shebang of its own.
+          grep -qxF lib/common.sh shell-scripts.txt || echo lib/common.sh >> shell-scripts.txt
+          sort -u -o shell-scripts.txt shell-scripts.txt
+          sort -u -o python-scripts.txt python-scripts.txt
+          echo "--- shell ---"; cat shell-scripts.txt
+          echo "--- python ---"; cat python-scripts.txt
+          [ -s shell-scripts.txt ] || { echo "no shell scripts found — the globs are wrong"; exit 1; }
+
+      # SC1091 only: every bin/ script sources lib/common.sh through `$(dirname "$0")/..`,
+      # which shellcheck cannot resolve statically. Nothing else is excluded.
+      - name: shellcheck
+        run: xargs -r -a shell-scripts.txt shellcheck --exclude=SC1091 --
+
+      # shellcheck parses; `bash -n` is the parser the scripts actually run under.
+      - name: bash -n
+        run: |
+          set -euo pipefail
+          while read -r f; do bash -n "$f"; done < shell-scripts.txt
+
+      - name: --help works
+        run: |
+          set -euo pipefail
+          # Every bash script in bin/ answers --help without touching the machine.
+          rc=0
+          while read -r f; do
+            case "$f" in bin/*) ;; *) continue ;; esac
+            "$f" --help > /dev/null || { echo "no --help: $f"; rc=1; }
+          done < shell-scripts.txt
+          exit "$rc"
+
+  json:
+    name: json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the settings Claude Code loads
+        run: |
+          set -euo pipefail
+          jq -e . claude-global/settings.json > /dev/null
+          # A typo in a permission rule fails open, so check the shape too.
+          jq -e '.permissions.deny | type == "array" and length > 0' claude-global/settings.json > /dev/null
+          jq -e '.permissions.defaultMode == "auto"' claude-global/settings.json > /dev/null
+      - name: Validate the issue-form templates
+        run: |
+          set -euo pipefail
+          for f in .github/ISSUE_TEMPLATE/*.yml .github/workflows/*.yml; do
+            python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' "$f"
+          done
+
+  python:
+    name: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: ruff
+        run: |
+          set -euo pipefail
+          # Same shebang split as the shell job: *.py plus the extensionless uv scripts.
+          files=$(git ls-files '*.py')
+          for f in bin/*; do
+            [ -f "$f" ] || continue
+            case "$(head -1 -- "$f")" in *python*|*'uv run'*) files="$files $f" ;; esac
+          done
+          echo "$files" | tr ' ' '\n'
+          # shellcheck disable=SC2086
+          uvx ruff@0.14.0 check $files

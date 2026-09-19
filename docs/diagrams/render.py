@@ -246,7 +246,6 @@ def draw_map(t: dict) -> str:
     kx = lx + 200
     for i, (k, lab) in enumerate([("git", "git → GitHub"), ("r2", "rclone → R2"), ("crypt", "encrypted, two-way"), ("local", "not synced")]):
         yy = ly + (i // 2) * 28
-        xx = kx + (i % 2) * 0 if False else kx
         s.rect(kx, ly - 1 + i * 19, 18, 12, r=6, fill=t[k])
         s.text(kx + 26, ly + 9.5 + i * 19, lab, 12, 500, t["muted"])
 
@@ -452,7 +451,7 @@ def draw_build(t: dict) -> str:
             f"authenticates, and Claude alone. The handover at step 14 is the pivot. {n_rebuild} steps are repeated "
             f"when rebuilding a machine.")
     s.header("Diagram 2 · The build", "38 steps. From step 15, Claude drives.",
-             [f"Before the handover you open accounts and type four commands. After it, you log in, grant and decide — nothing else.",
+             ["Before the handover you open accounts and type four commands. After it, you log in, grant and decide — nothing else.",
               f"Filled steps are what a second machine repeats: {n_rebuild} of 38."])
 
     gx, gy = 176, 206
@@ -532,7 +531,6 @@ def draw_build(t: dict) -> str:
     s.line(pivot_x, gy - 6, pivot_x, grid_bottom + 8, t["ink"], 2.2)
     s.rect(pivot_x - 52, gy - 30, 104, 24, r=12, fill=t["ink"])
     s.text(pivot_x, gy - 13.5, "HANDOVER", 11, 700, t["bg"], "middle", ls="0.12em")
-    cy_h = hy + hh / 2
     s.text(pivot_x + 16, hy + hh - 16, "From here on you only log in, grant, and decide.", 12.5, 600, t["human"], italic=True)
 
     # legend
