@@ -3,7 +3,11 @@
   <img alt="Install the operator first. Four commands in Terminal, then Claude Code sets up the rest: the machine map, SSH key, tailnet, Bitwarden, hooks, Brewfiles, brains and the daily loop." src="docs/diagrams/hero.svg" width="100%">
 </picture>
 
-# An opinionated version of what an AI-first Mac and dev workflow looks like
+# claude-computer
+
+_An opinionated version of what an AI-first Mac and dev workflow looks like._
+
+[claude-computer.com](https://claude-computer.com)
 
 ## Quick start
 
@@ -23,11 +27,11 @@ You need a Mac on a recent macOS — recent enough that Homebrew still supports 
 2. **Create your private copy** of this template and open Claude Code in it:
 
    ```bash
-   cd ~ && gh repo create system-manager --template narendranag/ai-first-machine-setup --private --clone
-   cd ~/system-manager && claude
+   cd ~ && gh repo create claude-computer --template narendranag/claude-computer --private --clone
+   cd ~/claude-computer && claude
    ```
 
-   No `--template` (an older `gh`, or a mirror)? Clone and repoint instead: `git clone https://github.com/narendranag/ai-first-machine-setup.git ~/system-manager`, then create an empty private repo of your own and `git remote set-url origin <your repo>`.
+   No `--template` (an older `gh`, or a mirror)? Clone and repoint instead: `git clone https://github.com/narendranag/claude-computer.git ~/claude-computer`, then create an empty private repo of your own and `git remote set-url origin <your repo>`.
 
 3. **Hand over** — log in to Claude Code, check the status line shows auto mode, and paste the prompt from [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). From there you log in, grant permissions and decide; Claude does the rest.
 
@@ -64,14 +68,14 @@ The human keeps three jobs:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/map-dark.svg">
-  <img alt="Diagram of the home directory: system-manager, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. Bitwarden feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
+  <img alt="Diagram of the home directory: claude-computer, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. Bitwarden feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
 </picture>
 
 The home directory gets a handful of top-level folders that sit beside the macOS defaults, not instead of them:
 
 ```text
 ~/
-  system-manager/     the fleet brain — repo
+  claude-computer/     the fleet brain — repo
   projects/           active work — one repo per project (+ _scratch/, disposable)
   products/           projects that graduated to production — one repo each
   personal/           finance, personal projects — one repo each
@@ -81,9 +85,9 @@ The home directory gets a handful of top-level folders that sit beside the macOS
   resources/<person>/ family key documents — encrypted two-way sync
 ```
 
-**Top-level folders are containers, not repos** (except `system-manager` and `vault`). Repos live one level down. Nothing is ever nested.
+**Top-level folders are containers, not repos** (except `claude-computer` and `vault`). Repos live one level down. Nothing is ever nested.
 
-**The brain-per-folder rule.** Any folder that needs automation gets its own `CLAUDE.md` — a _brain_ — and a `TASKS.md`. You start Claude in the folder where the work is; that brain says what to do _here_, and points to `~/system-manager/docs/` for what the system looks like. `archive/` has a brain whose two jobs are archive and retrieve. `library/camera` has one that ingests cards and finds photos by metadata. `resources/` has one that OCRs scans and tracks passport expiry dates. Folders that just hold files have no brain.
+**The brain-per-folder rule.** Any folder that needs automation gets its own `CLAUDE.md` — a _brain_ — and a `TASKS.md`. You start Claude in the folder where the work is; that brain says what to do _here_, and points to `~/claude-computer/docs/` for what the system looks like. `archive/` has a brain whose two jobs are archive and retrieve. `library/camera` has one that ingests cards and finds photos by metadata. `resources/` has one that OCRs scans and tracks passport expiry dates. Folders that just hold files have no brain.
 
 **Everything has exactly one way off the machine:**
 
@@ -125,8 +129,8 @@ Log in, and check the status line reads **⏵⏵ auto mode on** before the first
 **Phase 2 — The handover.** Your last solo act:
 
 ```bash
-cd ~ && gh repo create system-manager --template narendranag/ai-first-machine-setup --private --clone
-cd ~/system-manager && claude
+cd ~ && gh repo create claude-computer --template narendranag/claude-computer --private --clone
+cd ~/claude-computer && claude
 ```
 
 Then paste the prompt from [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md):
@@ -164,7 +168,7 @@ At the end, commit and push docs/ and tell me what is left.
 
 `/setup` covers foundation, environment and protection; it ends by queueing folders, brains and workflows in `TASKS.md` as the next jobs, so each gets its own conversation.
 
-**A second machine is the fifteen filled steps in the diagram**, not thirty-eight: the four commands, `gh repo clone <you>/system-manager ~/system-manager` instead of creating from the template, then `/setup` — which reads the repo, finds everything already decided, and asks only what's specific to this machine.
+**A second machine is the fifteen filled steps in the diagram**, not thirty-eight: the four commands, `gh repo clone <you>/claude-computer ~/claude-computer` instead of creating from the template, then `/setup` — which reads the repo, finds everything already decided, and asks only what's specific to this machine.
 
 ## The brain
 
@@ -173,7 +177,7 @@ At the end, commit and push docs/ and tell me what is left.
   <img alt="The session loop: SessionStart hook pulls the repo and checks Bitwarden; Claude orients by reading CLAUDE.md, the machine file and FLEET.md; work; record changes in the machine file, DECISIONS.md and TASKS.md; Stop hook commits docs as [host] and pushes. The shared repo holds one file per machine, each written only by its own machine." src="docs/diagrams/loop.svg" width="100%">
 </picture>
 
-`~/system-manager` is a private repo created from this template, cloned on every machine that runs Claude Code. Four files carry the weight:
+`~/claude-computer` is a private repo created from this template, cloned on every machine that runs Claude Code. Four files carry the weight:
 
 | File                      | Holds                                                | Rule                                                                                                         |
 | ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -188,7 +192,7 @@ At the end, commit and push docs/ and tell me what is left.
 
 **Hooks do the syncing, not discipline.** The `SessionStart` hook pulls with `--rebase --autostash`, reports whether Bitwarden is unlocked, and refreshes task copies in the vault. The `Stop` hook commits any `docs/` change as `[host] update …` and pushes, at the end of every turn — because sessions get killed far more often than they get exited.
 
-**The backstop on each box.** Headless boxes have no brain; a manager reaches them over SSH on the tailnet. After changing one, the manager also writes that box's file to `/etc/system-manager/machine.md` on the box itself. If the repo is ever stale, or the box is reimaged, the box can still say what it is.
+**The backstop on each box.** Headless boxes have no brain; a manager reaches them over SSH on the tailnet. After changing one, the manager also writes that box's file to `/etc/claude-computer/machine.md` on the box itself. If the repo is ever stale, or the box is reimaged, the box can still say what it is.
 
 ## Trust
 
@@ -331,11 +335,11 @@ vault/
 **3. Create your instance and hand over:**
 
 ```bash
-cd ~ && gh repo create system-manager --template narendranag/ai-first-machine-setup --private --clone
-cd ~/system-manager && claude
+cd ~ && gh repo create claude-computer --template narendranag/claude-computer --private --clone
+cd ~/claude-computer && claude
 ```
 
-Without `--template`: `git clone https://github.com/narendranag/ai-first-machine-setup.git ~/system-manager`, then point `origin` at a private repo of your own.
+Without `--template`: `git clone https://github.com/narendranag/claude-computer.git ~/claude-computer`, then point `origin` at a private repo of your own.
 
 Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). Then do what it asks: log in, grant, decide.
 
@@ -360,6 +364,10 @@ Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). Then do what it asks: log 
 
 **Keeping up with the template.** Your instance keeps this repo as an `upstream` remote, fetch-only. Pull improvements when you choose. When you learn something worth sharing, `/upstream` rewrites it generically and opens a pull request here — never a push from your private instance.
 
+## Fork it for another agent
+
+This is built for Claude Code, and it's staying that way — the hooks, the slash commands and the permission model are all Claude Code specifics, not a generic agent abstraction. But the ideas underneath aren't Claude-specific: an operator first, a map the machine keeps honest, one brain per folder, scripts over prose, hooks for the syncing so nothing depends on remembering. If you want this for Codex, Gemini CLI or a local model, fork it — it's MIT — and tell me so I can link it here.
+
 ---
 
-MIT licensed. Built by a human who authenticated, set the mode and decided, and by Claude Code, which did the rest.
+MIT licensed. Built by a human who authenticated, set the mode and decided, and by Claude Code, which did the rest. claude-computer is an independent open-source project. It is not affiliated with, endorsed by or sponsored by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.
