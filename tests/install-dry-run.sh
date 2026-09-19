@@ -3,9 +3,11 @@
 #
 # Usage: ./tests/install-dry-run.sh
 #
-# Every case builds a temporary PATH of stub executables and points the installer's
+# Every case builds a temporary PATH of stub executables over a hermetic $SYSBIN — symlinks
+# to a named list of system tools and nothing else — and points the installer's
 # CC_INSTALL_TEST_* probes at temporary files, so nothing on the real machine is read or
-# written. Each stub appends its own invocation to $CC_STUB_LOG, which carries the two
+# written, and no tool the runner happens to have installed can leak into a case that is
+# meant to lack it. Each stub appends its own invocation to $CC_STUB_LOG, which carries the two
 # assertions that matter most: in --dry-run no mutating command ran, and before the Command
 # Line Tools are installed no /usr/bin Xcode shim was invoked.
 #
@@ -37,6 +39,37 @@ trap 'rm -rf "$WORK"' EXIT
 PASS=0
 FAIL=0
 
+# ---- the hermetic system PATH ---------------------------------------------
+# A case's PATH used to end in /usr/bin:/bin, which meant every case inherited whatever the
+# machine running the tests happened to have. GitHub's ubuntu images ship a real `gh` at
+# /usr/bin/gh, so case (i) — "nothing installed" — was handed a GitHub CLI it was supposed
+# to lack, and failed there while passing on a Mac, where gh lives in /opt/homebrew/bin.
+#
+# So every case runs on $SYSBIN instead: symlinks to a named list of system tools, and
+# nothing else. Anything the installer probes for and the case has not stubbed is genuinely
+# absent, identically on macOS and on Linux.
+SYSBIN="$WORK/sysbin"
+mkdir -p "$SYSBIN"
+
+# What install.sh, /bin/sh and the stubs actually run. Deliberately NOT here — each is
+# either stubbed per case or has to be missing for the case to mean anything:
+#   gh git brew claude pbcopy xcode-select clang python3 make sw_vers security curl
+SYS_TOOLS="sh bash env cat ls mkdir rm ln chmod touch mktemp date sleep
+awk sed grep cut tr head tail sort uniq wc tee stat dirname basename
+id uname df expr printf test true false"
+
+for t in $SYS_TOOLS; do
+  p="$(command -v "$t" 2>/dev/null)"
+  case "$p" in
+    /*) ln -sf "$p" "$SYSBIN/$t" ;;
+    # A shell builtin or keyword: always available, nothing to link.
+    ?*) : ;;
+    *)  printf 'tests/install-dry-run.sh: required system tool not found: %s\n' "$t" >&2
+        exit 1 ;;
+  esac
+done
+unset t p
+
 ok()  { printf '    ok   %s\n' "$*"; PASS=$((PASS + 1)); }
 bad() { printf '    FAIL %s\n' "$*" >&2; FAIL=$((FAIL + 1)); }
 
@@ -66,6 +99,14 @@ stub() {
   } > "$d/$n"
   chmod +x "$d/$n"
 }
+
+# The one network tool, stubbed once for every case: nothing here may reach the internet,
+# and a case that tried would otherwise really download the Homebrew installer. It logs, so
+# assert_no_mutation sees it, and fails, so the case does too.
+stub "$SYSBIN" curl <<'EOF'
+echo "tests: curl was invoked for real" >&2
+exit 1
+EOF
 
 # The three /usr/bin tools whose absence means "no Command Line Tools". They have to be
 # shadowed by failing stubs, because a real macOS has them on PATH whatever we do.
@@ -208,7 +249,7 @@ base_env
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/no-brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --dir "$D/claude-computer" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/claude-computer" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "→ Xcode Command Line Tools"
 contains "$D/out" "→ Homebrew"
@@ -239,7 +280,7 @@ export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
 # shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
 printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$D/claude-computer" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/claude-computer" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "✓ Xcode Command Line Tools"
 contains "$D/out" "✓ Homebrew"
@@ -261,7 +302,7 @@ base_env
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/offpath/brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$D/claude-computer" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/claude-computer" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "installed but not on your PATH"
 contains "$D/out" "Adding the line Homebrew asks for"
@@ -294,7 +335,7 @@ base_env
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$CLONE" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$CLONE" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "is already a claude-computer clone"
 contains "$D/out" "nothing to create"
@@ -321,7 +362,7 @@ contains "$D/out" "no terminal on stdin"
 contains "$D/out" "the pipe takes the terminal away"
 
 # A dry run changes nothing and asks nothing, so it does not need one.
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --dir "$D/cc" < /dev/null > "$D/dry" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" < /dev/null > "$D/dry" 2>&1
 check_exit 0 $?
 contains "$D/dry" "Fine for --dry-run; a real run needs one"
 contains "$D/dry" "5/5 Your copy of the template"
@@ -344,7 +385,7 @@ echo Linux
 EOF
 base_env
 unset CC_INSTALL_TEST_UNAME_S          # let the uname stub answer, as a real Linux box would
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes > "$D/out" 2>&1
 check_exit 3 $?
 contains "$D/out" "macOS only"
 contains "$D/out" "managed from a Mac over SSH"
@@ -402,7 +443,7 @@ base_env
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/no-brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --dir "$D/claude-computer" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/claude-computer" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "the path is set but git or clang is broken"
 contains "$D/out" "git identity — checked once the Command Line Tools are in"
@@ -478,7 +519,7 @@ export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
 # shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
 printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "Waiting for GitHub to finish copying the template"
 contains "$D/out" "the copy arrived"
@@ -501,7 +542,7 @@ export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
 # shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
 printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
 check_exit 1 $?
 contains "$D/out" "has not finished copying the template"
 contains "$D/out" "re-running is safe"
@@ -527,7 +568,7 @@ export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
 # shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
 printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "GitHub had not finished filling — resuming it"
 contains "$D/out" "Finishing the clone at"
@@ -551,7 +592,7 @@ base_env
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
 check_exit 0 $?
 if grep -q "^gh repo view octocat/claude-computer\$" "$CC_STUB_LOG"; then
   ok "asked gh for octocat/claude-computer, not a bare name"
@@ -581,7 +622,7 @@ EOF
   export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
   export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
   export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-  PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
+  PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
   check_exit "$want" $?
   contains "$D/out" "$needle"
   # Whatever the verdict, a refusal happens before anything is touched.
@@ -637,7 +678,7 @@ CC_TEST_REPO_FACTS="$(facts false false false)"; export CC_TEST_REPO_FACTS
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$CLONE" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$CLONE" > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "which is PUBLIC"
 absent   "$D/out" "is public."
@@ -661,7 +702,7 @@ CC_TEST_REPO_FACTS="$(facts false false false)"; export CC_TEST_REPO_FACTS
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
 check_exit 6 $?
 contains "$D/out" "is public."
 assert_no_mutation "$CC_STUB_LOG"
@@ -686,7 +727,7 @@ export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
 # shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
 printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
-PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
 check_exit 6 $?
 contains "$D/out" "was created but is not private"
 contains "$D/out" "gh repo edit"
