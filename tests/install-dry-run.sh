@@ -591,14 +591,20 @@ EOF
 # (a) the template itself, or any template repo
 suitability_case a "$(facts true false true)" 6 "is a template repository, not an instance"
 contains "$D/out" "--name my-claude-computer"
+# The preflight names the problem instead of first promising a clone it then refuses.
+contains "$D/out" "is a TEMPLATE repo, not an instance"
+absent "$D/out" "cloning it instead of creating it"
 
 # (b) a public fork of the template — the contributor's trap
 suitability_case b "$(facts false true false narendranag/claude-computer)" 6 "is public."
 contains "$D/out" "public fork of narendranag/claude-computer"
 contains "$D/out" "gh repo edit"
+contains "$D/out" "is PUBLIC — a machine map must not be pushed there"
+absent "$D/out" "cloning it instead of creating it"
 
 # (b2) public and not a fork is refused just the same
 suitability_case b2 "$(facts false false false)" 6 "is public."
+absent "$D/out" "cloning it instead of creating it"
 
 # (c) a private fork is a legitimate instance
 suitability_case c "$(facts true true false narendranag/claude-computer)" 0 "it is a private fork of narendranag/claude-computer"

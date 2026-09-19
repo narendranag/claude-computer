@@ -553,12 +553,23 @@ elif [ "$DIR_STATE" = "occupied" ]; then
   say "Move it aside, or pass --dir <somewhere else>, and run this again."
   exit 4
 elif [ "$REMOTE_STATE" = "exists" ]; then
+  # The verdict comes first: promising to clone it and then refusing in the next breath reads
+  # like a bug. An unsuitable repo gets a ! line naming the problem, then the refusal.
+  case "$REPO_VERDICT" in
+    template)
+      needs_you "$REPO_SLUG exists on GitHub but is a TEMPLATE repo, not an instance — nothing can be cloned from it as your fleet brain"
+      refuse_unsuitable_repo
+      ;;
+    public)
+      needs_you "$REPO_SLUG exists on GitHub but is PUBLIC — a machine map must not be pushed there, so it cannot be your instance"
+      refuse_unsuitable_repo
+      ;;
+  esac
   will "$REPO_SLUG already exists on GitHub — cloning it instead of creating it (this is the second-machine path)"
   case "$REPO_VERDICT" in
     privatefork) have "it is a private fork${REPO_PARENT:+ of $REPO_PARENT} — that is fine, using it" ;;
     ok) have "it is private and not a template — an instance, as expected" ;;
     unknown) needs_you "could not read whether $REPO_SLUG is private — confirm it is before /setup pushes a machine map to it" ;;
-    *) refuse_unsuitable_repo ;;
   esac
 elif [ "$REMOTE_STATE" = "absent" ]; then
   will "a private $NAME from the $TEMPLATE template, cloned to $DIR"
