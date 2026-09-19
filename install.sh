@@ -554,8 +554,14 @@ fi
 STEP="your copy of the template"
 head2 "5/5 Your copy of the template"
 
+# /setup deletes .template when it turns a fresh copy into your instance, so a clone of a
+# repo you already ran /setup on will not have it. Only a straight-from-the-template copy
+# is required to.
+WANT_TEMPLATE_MARK=1
+
 if [ "$DIR_STATE" = "clone" ]; then
   info "  $DIR is already there — skipping"
+  WANT_TEMPLATE_MARK=0
 elif [ "$PUBLIC_CLONE" -eq 1 ]; then
   say "  Read-only clone of $TEMPLATE. Nothing is created on your account."
   run git clone "https://github.com/$TEMPLATE.git" "$DIR"
@@ -563,6 +569,7 @@ elif [ "$REMOTE_STATE" = "exists" ]; then
   say "  $NAME already exists on your account — cloning it rather than creating a second one."
   say "  (This is the second-machine path: the repo already knows your fleet.)"
   run gh repo clone "$NAME" "$DIR"
+  WANT_TEMPLATE_MARK=0
 else
   say "  Creating a private $NAME from $TEMPLATE, then cloning it to $DIR."
   run mkdir -p "$PARENT"
@@ -573,10 +580,15 @@ else
 fi
 
 if [ "$DRY" -eq 0 ]; then
-  for f in CLAUDE.md docs/FIRST-PROMPT.md .template; do
+  for f in CLAUDE.md docs/FIRST-PROMPT.md; do
     [ -e "$DIR/$f" ] || die 1 "the clone at $DIR is missing $f — it is not a copy of $TEMPLATE"
   done
-  say "  ${C_G}✓${C_0} CLAUDE.md, docs/FIRST-PROMPT.md and .template are all there"
+  if [ "$WANT_TEMPLATE_MARK" -eq 1 ]; then
+    [ -e "$DIR/.template" ] || die 1 "the clone at $DIR has no .template — the copy did not come from $TEMPLATE"
+    say "  ${C_G}✓${C_0} CLAUDE.md, docs/FIRST-PROMPT.md and .template are all there"
+  else
+    say "  ${C_G}✓${C_0} CLAUDE.md and docs/FIRST-PROMPT.md are there"
+  fi
 fi
 # gitleaks scans every commit; without this the hook is inert.
 run git -C "$DIR" config core.hooksPath .githooks
