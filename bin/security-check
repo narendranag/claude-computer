@@ -7,7 +7,8 @@
 #   ssh box 'bash -s -- --ssh on' < bin/security-check     run on a headless box
 #
 # Checks: FileVault / disk encryption · firewall · sshd state matches the machine's role ·
-#         password SSH disabled wherever sshd runs · browse profiles private · Tailscale up.
+#         password SSH disabled wherever sshd runs · browse profiles private ·
+#         the vault's GitHub remote is not public · Tailscale up.
 #
 # Self-contained on purpose (no lib/ sourcing) so it can be piped to a box over SSH.
 # Output: one line per check, "PASS|FAIL|SKIP <check> — <detail>", prefixed with [<host>].
@@ -137,6 +138,28 @@ else
     report FAIL browse-profiles "$prof is inside a git work tree"
   else
     report PASS browse-profiles "private, outside any repo"
+  fi
+fi
+
+# --- The vault's remote must be private ------------------------------------
+# The vault is the second brain: notes, people, transcripts. `vault-setup --create-remote`
+# refuses a public repo, but a remote can be added or flipped by hand afterwards.
+vaultdir="${CC_VAULT:-$HOME/vault}"
+if [ ! -d "$vaultdir/.git" ]; then
+  report SKIP vault-remote "no vault on this machine"
+else
+  origin="$(git -C "$vaultdir" remote get-url origin 2>/dev/null || true)"
+  if [ -z "$origin" ]; then
+    report PASS vault-remote "local only, no remote"
+  elif ! command -v gh >/dev/null 2>&1; then
+    report SKIP vault-remote "gh not installed, cannot read $origin's visibility"
+  else
+    slug="$(printf '%s' "$origin" | sed -e 's#^.*github\.com[:/]##' -e 's#\.git$##')"
+    case "$(gh repo view "$slug" --json visibility --jq .visibility 2>/dev/null || true)" in
+      PUBLIC)            report FAIL vault-remote "$slug is PUBLIC — your notes are on the open internet" ;;
+      PRIVATE|INTERNAL)  report PASS vault-remote "$slug is private" ;;
+      *)                 report SKIP vault-remote "could not read visibility of $slug" ;;
+    esac
   fi
 fi
 

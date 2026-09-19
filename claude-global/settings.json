@@ -50,7 +50,13 @@
       "Bash(secrets-unlock --status)",
       "Bash(archive-pull --search:*)",
       "Bash(browse:*)",
-      "Bash(~/claude-computer/bin/browse:*)"
+      "Bash(~/claude-computer/bin/browse:*)",
+      "Bash(vault-setup)",
+      "Bash(vault-setup --dry-run)",
+      "Bash(vault-setup --upgrade)",
+      "Bash(~/claude-computer/bin/vault-setup)",
+      "Bash(~/claude-computer/bin/vault-setup --dry-run)",
+      "Bash(~/claude-computer/bin/vault-setup --upgrade)"
     ],
     "ask": [
       "Bash(git push:*)",
@@ -63,7 +69,9 @@
       "Bash(sudo:*)",
       "Bash(archive-push:*)",
       "Bash(resources-sync:*)",
-      "Bash(new-app:*)"
+      "Bash(new-app:*)",
+      "Bash(vault-setup:*)",
+      "Bash(~/claude-computer/bin/vault-setup:*)"
     ],
     "deny": [
       "Bash(bw get:*)",
