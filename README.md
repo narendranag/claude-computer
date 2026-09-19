@@ -82,7 +82,7 @@ The human keeps three jobs:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/map-dark.svg">
-  <img alt="Diagram of the home directory: claude-computer, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. Bitwarden feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
+  <img alt="Diagram of the home directory: claude-computer, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books, comics sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. Bitwarden feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
 </picture>
 
 The home directory gets a handful of top-level folders that sit beside the macOS defaults, not instead of them:
@@ -108,7 +108,7 @@ The home directory gets a handful of top-level folders that sit beside the macOS
 | What                                     | Mechanism                                     | Why                                                                                                                |
 | ---------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Brains, code, the vault                  | git → GitHub                                  | versioned, mergeable, works everywhere                                                                             |
-| Archive, camera cold copy, books         | `rclone` → Cloudflare R2, one-way             | cheap object storage with no egress fees; the archive index is rebuilt from the bucket, so there's nothing to sync |
+| Archive, camera cold copy, books, comics | `rclone` → Cloudflare R2, one-way             | cheap object storage with no egress fees; the archive index is rebuilt from the bucket, so there's nothing to sync |
 | Family documents                         | `rclone bisync` over an `rclone crypt` remote | two-way, and passport scans never sit in plain object storage                                                      |
 | A working folder between my own machines | Syncthing                                     | peer-to-peer, no cloud                                                                                             |
 | A file for someone else                  | Google Drive, or an R2 presigned link         | sharing is a separate job from syncing                                                                             |
@@ -299,24 +299,25 @@ vault/
 
 **Four forms, one rule: if it can be a script, it's a script.** A slash command is for when a step needs judgment or a conversation, and it orchestrates scripts rather than reimplementing them. A hook is for what must happen every time without asking. A scheduled job is for what must happen without a session, installed as a launchd agent by `bin/schedule`.
 
-| Workflow            | Trigger             | Form                                                                   |
-| ------------------- | ------------------- | ---------------------------------------------------------------------- |
-| Session start / end | every session       | hooks → `git pull`, `tasks-sync` / commit + push `docs/`, `tg-send`    |
-| New machine         | rare                | `/setup` → Brewfiles, `setup-tools.sh`, `map-check`                    |
-| New project         | often               | `/new-app` → `bin/new-app`                                             |
-| New vault           | once per machine    | `vault-setup` → the vault, its plugins, its Obsidian config            |
-| Meeting transcripts | on recording        | `transcripts-sync` (watches the MacParakeet database) → `/transcripts` |
-| Process inbox       | daily               | `/inbox` (transcripts first, then `quick.md`, then the rest)           |
-| Daily note          | 06:30 + on demand   | scheduled draft + `/today`                                             |
-| Reading digest      | 06:00               | `feeds-sync`                                                           |
-| Fleet drift         | daily               | `map-check` → `tg-send` on drift                                       |
-| Weekly review       | weekly              | `/review` — empties `## Unassigned` first                              |
-| Archive / retrieve  | ad hoc              | `/archive`, `/retrieve` → `archive-push`, `archive-pull`               |
-| Camera card         | when a card goes in | `camera-ingest`                                                        |
-| Family documents    | hourly              | `resources-sync`                                                       |
-| Graduate a project  | ad hoc              | `/graduate`                                                            |
-| Upstream a lesson   | occasional          | `/upstream` → PR against this template                                 |
-| Rotate a secret     | ad hoc              | `/rotate`                                                              |
+| Workflow                 | Trigger             | Form                                                                   |
+| ------------------------ | ------------------- | ---------------------------------------------------------------------- |
+| Session start / end      | every session       | hooks → `git pull`, `tasks-sync` / commit + push `docs/`, `tg-send`    |
+| New machine              | rare                | `/setup` → Brewfiles, `setup-tools.sh`, `map-check`                    |
+| New project              | often               | `/new-app` → `bin/new-app`                                             |
+| New vault                | once per machine    | `vault-setup` → the vault, its plugins, its Obsidian config            |
+| Meeting transcripts      | on recording        | `transcripts-sync` (watches the MacParakeet database) → `/transcripts` |
+| Process inbox            | daily               | `/inbox` (transcripts first, then `quick.md`, then the rest)           |
+| Daily note               | 06:30 + on demand   | scheduled draft + `/today`                                             |
+| Reading digest           | 06:00               | `feeds-sync`                                                           |
+| Fleet drift              | daily               | `map-check` → `tg-send` on drift                                       |
+| Weekly review            | weekly              | `/review` — empties `## Unassigned` first                              |
+| Archive / retrieve       | ad hoc              | `/archive`, `/retrieve` → `archive-push`, `archive-pull`               |
+| Camera card              | when a card goes in | `camera-ingest`                                                        |
+| Books / comics cold copy | weekly              | `library-push`                                                         |
+| Family documents         | hourly              | `resources-sync`                                                       |
+| Graduate a project       | ad hoc              | `/graduate`                                                            |
+| Upstream a lesson        | occasional          | `/upstream` → PR against this template                                 |
+| Rotate a secret          | ad hoc              | `/rotate`                                                              |
 
 **Build them in this order.** Plumbing first — unlock, notifications, the hooks, `tasks-sync`, `map-check` — because everything else assumes keys, sync and a trustworthy map. Then the daily loop, because you touch it every day. Then the per-trigger jobs, when their trigger first happens. `/setup` gets validated properly only when you build machine two.
 

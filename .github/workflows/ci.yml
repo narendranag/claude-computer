@@ -71,6 +71,11 @@ jobs:
       - name: vault-setup matrix
         run: ./tests/vault-setup.sh
 
+      # library-push pushes ~/library/books and ~/library/comics one-way to R2; rclone and
+      # bw are stubs, so this never reaches Bitwarden or the network.
+      - name: library-push matrix
+        run: ./tests/library-push.sh
+
       - name: --help works
         run: |
           set -euo pipefail

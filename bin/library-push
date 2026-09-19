@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# library-push — one-way cold copy of ~/library/books and ~/library/comics (Calibre) to R2.
+#
+# Usage: library-push [--dry-run]
+#
+# Copies whichever of CC_LIBRARY_DIRS actually exist under ~/library to
+# r2:<bucket>/library/<name>/, then verifies with `rclone check --one-way`. Never deletes
+# anything, locally or in R2 (`rclone copy`, never `sync`). A directory that doesn't exist
+# is skipped with a message, not an error — most machines only have one of the two.
+#
+# Calibre keeps `metadata.db` open while it runs: close Calibre before pushing, or accept
+# that a copy taken mid-write may lag by one edit. `*.db-journal` and `*-lock.*` files are
+# never trustworthy off-machine and are excluded from the copy.
+#
+# Env: CC_LIBRARY (default ~/library) · CC_LIBRARY_DIRS (default "books comics")
+# Exit codes: 0 ok (including "nothing to push") · 1 copy/verify failed · 2 usage · 3 rclone missing · 4 locked · 5 config
+set -euo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+cc_wants_help "$@"
+
+LIB="${CC_LIBRARY:-$HOME/library}"
+DIRS="${CC_LIBRARY_DIRS:-books comics}"
+dry=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry=1; shift ;;
+    *) cc_usage >&2; exit "$EX_USAGE" ;;
+  esac
+done
+
+cc_need rclone
+
+pushed=0; failed=0
+for name in $DIRS; do
+  src="$LIB/$name"
+  if [ ! -d "$src" ]; then
+    cc_info "[$(cc_host)] library-push: no $src here, skipping"
+    continue
+  fi
+
+  cc_r2_env
+  dst="r2:$CC_R2_BUCKET/library/$name"
+  cc_info "[$(cc_host)] library-push $name → $dst"
+
+  excl=(--exclude "*.db-journal" --exclude "*-lock.*")
+  if [ "$dry" -eq 1 ]; then
+    rclone copy --dry-run "${excl[@]}" "$src" "$dst"
+    continue
+  fi
+
+  rclone copy --checksum "${excl[@]}" "$src" "$dst" || { cc_err "push failed: $name"; failed=$((failed + 1)); continue; }
+  rclone check --one-way "${excl[@]}" "$src" "$dst" || { cc_err "verify failed: $name (local copy kept)"; failed=$((failed + 1)); continue; }
+  pushed=$((pushed + 1))
+  cc_info "[$(cc_host)] library-push $name: verified"
+done
+
+[ "$failed" -eq 0 ] || exit "$EX_FAIL"
+exit "$EX_OK"

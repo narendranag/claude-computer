@@ -14,6 +14,7 @@
 #                                     the working directory and --allowedTools is read/edit + git commit
 #   map-check        daily 09:00      drift report → tg-send only when there is drift
 #   transcripts-sync on db change     MacParakeet transcriptions → vault/inbox/transcripts (WatchPaths)
+#   library-push     weekly           cold copy of ~/library/books, comics (Calibre) to R2
 #
 # Logs: ~/Library/Logs/claude-computer/<job>.log
 # Exit codes: 0 ok · 1 launchctl failed, or this table and JOBS disagree · 2 usage / unknown job · 3 not macOS
@@ -25,7 +26,7 @@ cc_is_macos || cc_die "$EX_DEPS" "launchd is macOS-only; on Linux use a systemd 
 AGENTS="$HOME/Library/LaunchAgents"
 LOGS="$HOME/Library/Logs/claude-computer"
 PREFIX="local.claude-computer"
-JOBS="tasks-sync resources-sync feeds-sync daily-note map-check transcripts-sync"
+JOBS="tasks-sync resources-sync feeds-sync daily-note map-check transcripts-sync library-push"
 
 # The job list lives twice — the table in the header above, which `--help` prints, and JOBS.
 # Two copies drift, so `list` diffs them and fails instead of quietly telling you half the truth.
@@ -37,7 +38,8 @@ check_table() {
     "the header table and JOBS disagree — table: [$from_table] JOBS: [$from_jobs]"
 }
 
-# job → "<schedule>|<command>"; schedule is "interval:<seconds>", "daily:<HH>:<MM>" or "watch:<path>"
+# job → "<schedule>|<command>"; schedule is "interval:<seconds>", "daily:<HH>:<MM>",
+# "weekly:<0-6, Sunday=0>:<HH>:<MM>" or "watch:<path>"
 job_def() {
   local b="$CC_ROOT/bin"
   case "$1" in
@@ -53,6 +55,7 @@ job_def() {
     # A private per-run file, not a fixed /tmp path any other user could pre-create.
     map-check)      echo "daily:09:00|t=\$(mktemp -t cc-map-check) || exit 1; trap 'rm -f \"\$t\"' EXIT; $b/map-check >\"\$t\" 2>&1 || $b/tg-send <\"\$t\"" ;;
     transcripts-sync) echo "watch:$HOME/Library/Application Support/MacParakeet/macparakeet.db|$b/transcripts-sync" ;;
+    library-push)   echo "weekly:0:03:00|$b/library-push" ;;
     *) return 1 ;;
   esac
 }
@@ -68,6 +71,9 @@ install_job() {
     interval:*) timing="<key>StartInterval</key><integer>${sched#interval:}</integer>" ;;
     daily:*) local hm="${sched#daily:}"
              timing="<key>StartCalendarInterval</key><dict><key>Hour</key><integer>$((10#${hm%%:*}))</integer><key>Minute</key><integer>$((10#${hm##*:}))</integer></dict>" ;;
+    weekly:*) local wdhm="${sched#weekly:}"
+              local wd="${wdhm%%:*}" rest="${wdhm#*:}"
+              timing="<key>StartCalendarInterval</key><dict><key>Weekday</key><integer>$((10#$wd))</integer><key>Hour</key><integer>$((10#${rest%%:*}))</integer><key>Minute</key><integer>$((10#${rest##*:}))</integer></dict>" ;;
     watch:*) # run when the file changes; ThrottleInterval coalesces a burst of writes into one run
              timing="<key>WatchPaths</key><array><string>${sched#watch:}</string></array><key>ThrottleInterval</key><integer>30</integer>" ;;
   esac
@@ -101,7 +107,7 @@ case "${1:-}" in
     check_table
     for j in $JOBS; do
       d="$(job_def "$j")"
-      s="${d%%|*}"; case "$s" in watch:*) s="on file change" ;; esac
+      s="${d%%|*}"; case "$s" in watch:*) s="on file change" ;; weekly:*) s="weekly" ;; esac
       printf '%-17s %-15s %s\n' "$j" "$s" "$(loaded "$j" && echo loaded || echo -)"
     done ;;
   install)

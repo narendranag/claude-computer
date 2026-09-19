@@ -711,7 +711,7 @@ def draw_forms(t: dict) -> str:
         ("plumbing", ["secrets-unlock", "tg-send", "tasks-sync", "map-check", "security-check", "schedule"]),
         ("research", ["tavily", "exa", "firecrawl", "jina", "browse"]),
         ("google", ["gcal", "gmail", "gdrive"]),
-        ("storage", ["archive-push", "archive-pull", "camera-ingest", "resources-sync"]),
+        ("storage", ["archive-push", "archive-pull", "camera-ingest", "library-push", "resources-sync"]),
         ("daily", ["feeds-sync", "transcripts-sync", "new-app", "wt"]),
     ]
     gy = by + 96

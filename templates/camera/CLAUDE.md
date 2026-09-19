@@ -28,4 +28,4 @@ camera/
 ## Rules
 
 - The cold push is one-way. Never delete a local folder unless I ask, and only after `rclone check` against R2 passes.
-- `books/` and `comics/` next door belong to Calibre. Don't touch them except to include them in the cold push.
+- `books/` and `comics/` next door belong to Calibre. Don't touch them — they're included by `library-push`, not this brain.
