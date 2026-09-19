@@ -76,6 +76,10 @@ jobs:
       - name: library-push matrix
         run: ./tests/library-push.sh
 
+      # setup-tools.sh --only vscode; `code` is a stub, so no real extension is ever installed.
+      - name: setup-tools.sh vscode dry-run and failure matrix
+        run: ./tests/setup-tools-dry-run.sh
+
       - name: --help works
         run: |
           set -euo pipefail

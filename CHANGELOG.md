@@ -10,6 +10,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - `bin/library-push`: the one-way cold copy of `~/library/books` and `~/library/comics` (Calibre) to `r2:<bucket>/library/<name>/` that the README and the camera brain already claimed. Nothing in `bin/` pushed them before this — `camera-ingest`'s cold push only ever touched the shoot folder it had just ingested. Reuses `cc_r2_env` exactly as `archive-push` and `camera-ingest` do, so credentials come from Bitwarden and never touch argv or a config file; `rclone copy`, never `sync`, so nothing is ever deleted; `--dry-run`; a post-copy `rclone check --one-way`; skips cleanly, exit 0, when neither directory exists; excludes `*.db-journal` and `*-lock.*` (Calibre's `metadata.db` should be closed before a push, noted in the header). Wired into `bin/schedule` as an optional weekly job, `claude-global/settings.json`'s ask list, the README's Workflows table, and the camera brain's wording. `tests/library-push.sh` covers it with an rclone stub, in the style of `tests/vault-setup.sh`.
 
+### Fixed
+
+- `setup-tools.sh --only vscode --dry-run` printed nothing. `run code --install-extension "$ext" >/dev/null` swallowed `run`'s own dry-run echo, since the redirect applies to `run`'s output, not the (unrun) real command's; and when every extension was already installed, there was no output at all — no summary, nothing. Dry-run now prints the command that would run for each extension to install, and a "N already installed" summary; a real run stays quiet per extension except a one-line installed/failed result plus a final summary, and still exits non-zero if any install failed. This is the only step with the redirect-swallows-dry-run pattern; the others don't redirect `run`'s output. `tests/setup-tools-dry-run.sh` covers it.
+
 ## [0.3.1] — 2026-09-19
 
 One private repo for the whole fleet, said plainly — and an installer that asks what to call it.

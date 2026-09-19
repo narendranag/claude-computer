@@ -73,12 +73,28 @@ if want vscode; then
   step "VS Code extensions"
   if command -v code >/dev/null; then
     installed="$(code --list-extensions | tr '[:upper:]' '[:lower:]')"
+    already=0; installed_n=0; failed_n=0
     # Read from a process substitution, not the right-hand side of a pipe: a loop in a
     # subshell cannot set fail, so every failed extension used to exit 0.
+    # The dry-run echo is never redirected — `run … >/dev/null` in dry-run only echoes
+    # the command, and the redirect used to swallow that echo, so nothing printed at all.
     while read -r ext; do
-      if echo "$installed" | grep -qx "$(echo "$ext" | tr '[:upper:]' '[:lower:]')"; then continue; fi
-      run code --install-extension "$ext" >/dev/null || { echo "  failed: $ext" >&2; fail=1; }
+      if echo "$installed" | grep -qx "$(echo "$ext" | tr '[:upper:]' '[:lower:]')"; then
+        already=$((already + 1)); continue
+      fi
+      if [ "$dry" -eq 1 ]; then
+        run code --install-extension "$ext"
+      elif run code --install-extension "$ext" >/dev/null 2>&1; then
+        echo "  installed: $ext"; installed_n=$((installed_n + 1))
+      else
+        echo "  failed: $ext" >&2; failed_n=$((failed_n + 1)); fail=1
+      fi
     done < <(grep -v '^[[:space:]]*#' vscode-extensions.txt | grep -v '^[[:space:]]*$')
+    if [ "$dry" -eq 1 ]; then
+      [ "$already" -gt 0 ] && echo "  $already already installed"
+    else
+      echo "  $installed_n installed, $failed_n failed, $already already installed"
+    fi
   else echo "  code not on PATH — open VS Code once, run 'Shell Command: Install code in PATH'" >&2; fi
 fi
 
