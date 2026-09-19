@@ -2,3 +2,10 @@
 .obsidian/cache
 .trash/
 .DS_Store
+
+# Plugin code is downloaded, not authored: `vault-setup` restores it on any machine, and
+# .obsidian/plugins/VERSIONS.md records what each version was. Plugin settings (manifest.json,
+# data.json, .source.json) are shareable and stay in the repo.
+.obsidian/plugins/*/main.js
+.obsidian/plugins/*/styles.css
+.obsidian/plugins/*/*.js.map

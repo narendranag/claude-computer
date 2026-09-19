@@ -67,3 +67,5 @@ Enforce it when filing. Fix it when you see it wrong.
 ## Plugins
 
 Obsidian Git (sync), Dataview (queries over frontmatter), Templater. Everything else must earn its place.
+
+`vault-setup` installs all three from Obsidian's registry into `.obsidian/plugins/`, and records the version and release of each in `.obsidian/plugins/VERSIONS.md`. Upgrade with `vault-setup --upgrade`. Their `main.js` is not in this repo — it is downloaded code, so `vault-setup` restores it on a second machine; `manifest.json` and `data.json` are committed, so the settings travel. Obsidian Git is configured for manual commits and a pull when the vault opens: Claude commits after each job (Rule 5), and a plugin committing on a timer underneath that would fight it. Restricted mode has to be turned off by hand once, in Settings → Community plugins.
