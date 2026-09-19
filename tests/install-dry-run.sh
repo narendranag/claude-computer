@@ -10,7 +10,8 @@
 #
 # Cases: (i) nothing installed · (ii) everything installed and authed · (iii) brew present
 # but not on PATH · (iv) an existing clone at --dir · (v) stdin is not a terminal ·
-# (vi) Linux.
+# (vi) Linux · (vii) bad arguments · (viii) the first prompt extracts from the real
+# docs/FIRST-PROMPT.md.
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #

@@ -13,8 +13,9 @@ brew install gitleaks shellcheck jq   # the three the checks need
 Before opening a pull request, run what CI runs:
 
 ```bash
-shellcheck bin/* lib/*.sh *.sh .githooks/* claude-global/hooks/*.sh
+shellcheck bin/* lib/*.sh *.sh tests/*.sh .githooks/* claude-global/hooks/*.sh
 bash -n <each of those>
+./tests/install-dry-run.sh          # install.sh through six simulated machines, all in --dry-run
 jq -e . claude-global/settings.json
 ruff check lib docs/diagrams
 ```

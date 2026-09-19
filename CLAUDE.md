@@ -39,6 +39,8 @@ You are the operator for this user's machines. This repo is the shared brain for
 | `lib/cc.py`, `lib/google_auth.py`             | the same for the `uv run --script` scripts; Google OAuth                            |
 | `claude-global/`                              | symlinked to `~/.claude` — global CLAUDE.md, settings, hooks, slash commands        |
 | `Brewfile`, `Brewfile.dev`, `Brewfile.server` | packages, layered by role                                                           |
+| `install.sh`                                  | the one-liner that puts the operator on a new Mac; `docs/INSTALL.md` explains it    |
+| `tests/`                                      | what CI runs beyond shellcheck — `install-dry-run.sh` drives `install.sh --dry-run` |
 | `setup-tools.sh`                              | what Homebrew cannot install — oh-my-zsh, runtimes, Playwright, VS Code extensions  |
 | `dotfiles/`                                   | shell, prompt, terminal, git — linked by `/setup`                                   |
 | `macos-defaults.sh`                           | `defaults write` for a new Mac                                                      |

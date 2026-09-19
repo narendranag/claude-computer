@@ -6,6 +6,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- `install.sh` — the one-liner behind `https://claude-computer.com/install.sh`. It does what the README's four commands do (Xcode Command Line Tools, Homebrew, `gh` and its login, the Claude Code cask) and then creates your private copy of the template, checking each component first so it is safe to re-run. `--dry-run`, `--yes`, `--dir`, `--name`, `--public-clone`; `CC_INSTALL_TEMPLATE` for forks. It is self-contained — it runs before the repo exists on the machine, so it cannot source `lib/common.sh`. Documented in [`docs/INSTALL.md`](docs/INSTALL.md).
+- `tests/install-dry-run.sh` — eight simulated machines through `install.sh --dry-run`, on a temporary `PATH` of logging stubs. The load-bearing assertion is that no mutating command appears in the stub log. In CI, in the `shell` job.
+
 ## [0.2.1] — 2026-09-19
 
 ### Fixed
