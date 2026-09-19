@@ -129,7 +129,7 @@ case "$DIR" in "$HOME"/*) DISPLAY_DIR="~${DIR#"$HOME"}" ;; esac
 # ---- traps ----------------------------------------------------------------
 STEP="starting up"
 
-# shellcheck disable=SC2329  # invoked by the ERR trap below, not by name
+# shellcheck disable=SC2317,SC2329  # invoked by the ERR trap below, not by name (older shellcheck: SC2317)
 on_err() {
   err "failed during: $STEP"
   err "nothing is half-installed that a re-run cannot finish — run the same command again."

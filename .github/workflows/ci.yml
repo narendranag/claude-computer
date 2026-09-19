@@ -16,8 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The same shellcheck contributors get from Homebrew, not whatever apt has: Ubuntu's older
+      # build numbers its findings differently (SC2317 vs SC2329) and has failed runs that were
+      # clean locally.
       - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+        run: pipx install 'shellcheck-py>=0.11,<0.12' && shellcheck --version
 
       # Not every bin/ script is bash: some are Python behind a `uv run --script` shebang,
       # and neither has a file extension. Sort them by shebang so a new script needs no

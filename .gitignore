@@ -58,3 +58,6 @@ Icon?
 !.vscode/extensions.json
 .idea/
 *.swp
+
+# wrangler scratch
+.wrangler/
