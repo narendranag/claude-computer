@@ -39,7 +39,7 @@ while [ $# -gt 0 ]; do
     *) if [ -z "$card" ]; then card="$1"; elif [ -z "$shoot" ]; then shoot="$1"; else cc_usage >&2; exit "$EX_USAGE"; fi; shift ;;
   esac
 done
-[ -d "$card" ] && [ -n "$shoot" ] || { cc_usage >&2; exit "$EX_USAGE"; }
+if [ ! -d "$card" ] || [ -z "$shoot" ]; then cc_usage >&2; exit "$EX_USAGE"; fi
 [[ "$shoot" =~ ^[a-z0-9][a-z0-9-]*$ ]] || cc_die "$EX_USAGE" "shoot name: lowercase letters, digits, dashes"
 
 # One `-ext` per extension. The default is deliberately broad — a card from a borrowed
