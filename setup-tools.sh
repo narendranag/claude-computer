@@ -73,10 +73,12 @@ if want vscode; then
   step "VS Code extensions"
   if command -v code >/dev/null; then
     installed="$(code --list-extensions | tr '[:upper:]' '[:lower:]')"
-    grep -v '^\s*#' vscode-extensions.txt | grep -v '^\s*$' | while read -r ext; do
-      echo "$installed" | grep -qx "$(echo "$ext" | tr '[:upper:]' '[:lower:]')" && continue
-      run code --install-extension "$ext" >/dev/null || echo "  failed: $ext" >&2
-    done
+    # Read from a process substitution, not the right-hand side of a pipe: a loop in a
+    # subshell cannot set fail, so every failed extension used to exit 0.
+    while read -r ext; do
+      if echo "$installed" | grep -qx "$(echo "$ext" | tr '[:upper:]' '[:lower:]')"; then continue; fi
+      run code --install-extension "$ext" >/dev/null || { echo "  failed: $ext" >&2; fail=1; }
+    done < <(grep -v '^[[:space:]]*#' vscode-extensions.txt | grep -v '^[[:space:]]*$')
   else echo "  code not on PATH — open VS Code once, run 'Shell Command: Install code in PATH'" >&2; fi
 fi
 

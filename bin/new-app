@@ -10,7 +10,7 @@
 #
 # Steps: run the stack's own scaffolder (create-next-app / create-expo-app / uv init /
 # create-tauri-app) → overlay templates/<type> (CLAUDE.md, TASKS.md, justfile, …) →
-# substitute {{name}} → install the secret-scan pre-commit hook → first commit →
+# substitute __NAME__ → install the secret-scan pre-commit hook → first commit →
 # gh repo create --private --push. /new-app wraps this and writes the real CLAUDE.md.
 #
 # Exit codes: 0 ok · 1 a step failed · 2 usage / target exists · 3 missing tool
@@ -49,23 +49,38 @@ case "$type" in
   mobile)  sm_need pnpm; do_ pnpm create expo-app@latest "$dir" --template default ;;
   cli)     sm_need uv;   do_ uv init --package --name "$name" "$dir"
                          [ "$dry" -eq 1 ] || (cd "$dir" && uv add typer rich && uv add --dev pytest ruff pyright) ;;
-  desktop) sm_need pnpm; do_ pnpm create tauri-app@latest "$name" --manager pnpm --template react-ts --yes
-                         [ "$dry" -eq 1 ] || { [ -d "$name" ] && [ "$PWD/$name" != "$dir" ] && mv "$name" "$dir"; } ;;
+  desktop) sm_need pnpm
+           # create-tauri-app scaffolds into ./<name>, so it has to run in $parent — not in
+           # whatever directory the caller happened to be in.
+           if [ "$dry" -eq 1 ]; then do_ pnpm create tauri-app@latest "$name" --manager pnpm --template react-ts --yes
+           else
+             (cd "$parent" && pnpm create tauri-app@latest "$name" --manager pnpm --template react-ts --yes)
+             [ -d "$dir" ] || sm_die "$EX_FAIL" "tauri scaffold did not create $dir"
+           fi ;;
 esac
 
 step "overlay templates/$type (existing files kept; .gitignore merged)"
 if [ "$dry" -eq 0 ]; then
-  (cd "$tpl" && find . -type f ! -name '.DS_Store') | while read -r f; do
+  # `... | while` would run the loop in a subshell and throw away fail — read from a
+  # process substitution instead, so a bad copy actually stops the scaffold.
+  fail=0
+  while read -r f; do
     src="$tpl/$f"; dst="$dir/$f"
-    mkdir -p "$(dirname "$dst")"
+    mkdir -p "$(dirname "$dst")" || { fail=1; continue; }
     if [ "$(basename "$f")" = ".gitignore" ] && [ -f "$dst" ]; then
-      cat "$src" >> "$dst"
+      cat "$src" >> "$dst" || fail=1
     elif [ ! -e "$dst" ] || [ "$(basename "$f")" = "README.md" ]; then
-      cp "$src" "$dst"
+      cp "$src" "$dst" || fail=1
     fi
-  done
-  grep -rlI '{{name}}' "$dir" --exclude-dir=node_modules --exclude-dir=.venv 2>/dev/null |
-    while read -r f; do sed -i '' "s/{{name}}/$name/g" "$f" 2>/dev/null || sed -i "s/{{name}}/$name/g" "$f"; done
+  done < <(cd "$tpl" && find . -type f ! -name '.DS_Store')
+  [ "$fail" -eq 0 ] || sm_die "$EX_FAIL" "could not overlay templates/$type onto $dir"
+
+  # __NAME__, not {{name}}: `{{…}}` is just's own interpolation syntax, so a justfile
+  # carrying the scaffold placeholder is unparseable until it is substituted.
+  while read -r f; do
+    sed -i '' "s/__NAME__/$name/g" "$f" 2>/dev/null || sed -i "s/__NAME__/$name/g" "$f" || fail=1
+  done < <(grep -rlI '__NAME__' "$dir" --exclude-dir=node_modules --exclude-dir=.venv 2>/dev/null)
+  [ "$fail" -eq 0 ] || sm_die "$EX_FAIL" "could not substitute the project name in $dir"
 fi
 
 step "git init + secret-scan hook + first commit"
