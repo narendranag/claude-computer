@@ -32,24 +32,24 @@ You are the operator for this user's machines. This repo is the shared brain for
 
 ## Where things are
 
-| Path | What |
-|---|---|
-| `bin/` | every script; run any with `--help` |
-| `lib/common.sh` | the `sm_*` helpers and `EX_*` exit codes every bash script sources |
-| `lib/sm.py`, `lib/google_auth.py` | the same for the `uv run --script` scripts; Google OAuth |
-| `claude-global/` | symlinked to `~/.claude` — global CLAUDE.md, settings, hooks, slash commands |
-| `Brewfile`, `Brewfile.dev`, `Brewfile.server` | packages, layered by role |
-| `setup-tools.sh` | what Homebrew cannot install — oh-my-zsh, runtimes, Playwright, VS Code extensions |
-| `dotfiles/` | shell, prompt, terminal, git — linked by `/setup` |
-| `macos-defaults.sh` | `defaults write` for a new Mac |
-| `templates/` | scaffolds for new apps and for the other brains (vault, archive, camera, resources) |
-| `.githooks/` | the gitleaks pre-commit scan; enabled with `git config core.hooksPath .githooks` |
-| `docs/FIRST-PROMPT.md` | the prompt a new user pastes |
-| `docs/DEV-GUIDELINES.md` | how every project is built |
-| `docs/SECRETS.md` | every Bitwarden item the scripts expect, and how to get each value |
-| `docs/FLEET.md` | index of machines |
-| `docs/DECISIONS.md` | append-only decision log |
-| `docs/TEMPLATE-DECISIONS.md` | why the template is built this way; supersede it in `docs/DECISIONS.md` |
-| `docs/machines/` | one file per machine |
-| `CHANGELOG.md` | what changed between template versions |
-| `UPSTREAM` | the template's URL, used by `/setup` and `/upstream` to set the fetch-only remote |
+| Path                                          | What                                                                                |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `bin/`                                        | every script; run any with `--help`                                                 |
+| `lib/common.sh`                               | the `sm_*` helpers and `EX_*` exit codes every bash script sources                  |
+| `lib/sm.py`, `lib/google_auth.py`             | the same for the `uv run --script` scripts; Google OAuth                            |
+| `claude-global/`                              | symlinked to `~/.claude` — global CLAUDE.md, settings, hooks, slash commands        |
+| `Brewfile`, `Brewfile.dev`, `Brewfile.server` | packages, layered by role                                                           |
+| `setup-tools.sh`                              | what Homebrew cannot install — oh-my-zsh, runtimes, Playwright, VS Code extensions  |
+| `dotfiles/`                                   | shell, prompt, terminal, git — linked by `/setup`                                   |
+| `macos-defaults.sh`                           | `defaults write` for a new Mac                                                      |
+| `templates/`                                  | scaffolds for new apps and for the other brains (vault, archive, camera, resources) |
+| `.githooks/`                                  | the gitleaks pre-commit scan; enabled with `git config core.hooksPath .githooks`    |
+| `docs/FIRST-PROMPT.md`                        | the prompt a new user pastes                                                        |
+| `docs/DEV-GUIDELINES.md`                      | how every project is built                                                          |
+| `docs/SECRETS.md`                             | every Bitwarden item the scripts expect, and how to get each value                  |
+| `docs/FLEET.md`                               | index of machines                                                                   |
+| `docs/DECISIONS.md`                           | append-only decision log                                                            |
+| `docs/TEMPLATE-DECISIONS.md`                  | why the template is built this way; supersede it in `docs/DECISIONS.md`             |
+| `docs/machines/`                              | one file per machine                                                                |
+| `CHANGELOG.md`                                | what changed between template versions                                              |
+| `UPSTREAM`                                    | the template's URL, used by `/setup` and `/upstream` to set the fetch-only remote   |

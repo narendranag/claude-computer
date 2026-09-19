@@ -7,7 +7,7 @@
 
 ## Quick start
 
-You need a Mac, a GitHub account and a Claude plan that includes Claude Code (Pro or Max). Everything else can be added as you go — the [full checklist](#get-started) lists the accounts worth opening first.
+You need a Mac on a recent macOS — recent enough that Homebrew still supports it, which in practice means one of the last three releases — a GitHub account, and a Claude plan that includes Claude Code (Pro or Max). Apple silicon or Intel both work; the only thing gated on the chip is the MacParakeet cask (Apple silicon, macOS 14+), which the Brewfile skips on Intel, taking the dictation and transcript pipeline with it. Everything else can be added as you go — the [full checklist](#get-started) lists the accounts worth opening first.
 
 1. **Install the operator** — four commands in Terminal.app:
 
@@ -18,12 +18,16 @@ You need a Mac, a GitHub account and a Claude plan that includes Claude Code (Pr
    brew install --cask claude-code
    ```
 
+   The Homebrew installer finishes by printing two `eval "$(… shellenv)"` lines. **Run them.** Until you do, `brew` isn't on your `PATH` and the third command fails with `command not found`.
+
 2. **Create your private copy** of this template and open Claude Code in it:
 
    ```bash
    cd ~ && gh repo create system-manager --template narendranag/ai-first-machine-setup --private --clone
    cd ~/system-manager && claude
    ```
+
+   No `--template` (an older `gh`, or a mirror)? Clone and repoint instead: `git clone https://github.com/narendranag/ai-first-machine-setup.git ~/system-manager`, then create an empty private repo of your own and `git remote set-url origin <your repo>`.
 
 3. **Hand over** — log in to Claude Code, check the status line shows auto mode, and paste the prompt from [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). From there you log in, grant permissions and decide; Claude does the rest.
 
@@ -190,7 +194,9 @@ At the end, commit and push docs/ and tell me what is left.
 
 Auto mode is only sane with guard rails. These are mine.
 
-**Auto mode, never bypass.** A classifier model reviews every action before it runs and blocks anything that goes beyond what you asked for, reaches infrastructure it doesn't recognize, or looks steered by content Claude just read. Rules sit on top, and they are absolute: in [`claude-global/settings.json`](claude-global/settings.json), `git push`, `rm`, `rclone`, `sudo` and the storage scripts are on the _ask_ list, which prompts even in auto mode; force-push, raw `bw get` and reading browser profiles are on the _deny_ list, which blocks in every mode. Anything the classifier refuses three times in a row drops the session back to asking you.
+**Auto mode, never bypass.** A classifier model reviews every action before it runs and blocks anything that goes beyond what you asked for, reaches infrastructure it doesn't recognize, or looks steered by content Claude just read. Rules sit on top: in [`claude-global/settings.json`](claude-global/settings.json), `git push`, `rm`, `rclone`, `sudo` and the storage scripts are on the _ask_ list, which prompts even in auto mode; force-push, raw `bw get`, the Keychain item holding the Bitwarden session token, and reading browser profiles are on the _deny_ list, which blocks in every mode. Anything the classifier refuses three times in a row drops the session back to asking you. The lists raise the bar and remove whole categories of accident. They are not a sandbox — see below.
+
+**One job runs unattended.** Everything else here assumes you are at the keyboard. The `daily-note` job in [`bin/schedule`](bin/schedule) is the exception: at 06:30 launchd runs `claude -p` with nobody to answer a prompt. So it is fenced in twice — its working directory is `~/vault`, which is the only tree it can edit, and `--allowedTools` limits it to `Read`, `Edit`, `Write`, `Glob`, `Grep` and `git status` / `add` / `commit`. Everything else is refused outright rather than queued for an approval that will never come. If you add a scheduled job that runs Claude, do the same, and say so in your `docs/DECISIONS.md`.
 
 **One SSH key per machine.** Generated on the machine, registered on GitHub under the machine's name, never copied. Losing a laptop means revoking one key.
 
@@ -203,6 +209,8 @@ Auto mode is only sane with guard rails. These are mine.
 **Time Machine is the net.** Auto mode on a machine you care about needs a whole-machine rollback. Pick a target during setup — an external disk or a box on the tailnet — and record it in the map.
 
 **A pre-commit secret scan everywhere.** `gitleaks` runs on every commit in this repo, in your instance, and in every project `new-app` scaffolds. It's the backstop, not the plan.
+
+**What this does not protect against.** Worth being plain about, because the list above can read as stronger than it is. The ask and deny rules are pattern matches on command strings, not a sandbox: they stop the obvious spelling of a thing, not every spelling of it, and a command that reaches the same place by another route — a script, an alias, an interpreter — goes through. The Bitwarden session token sits in the login Keychain precisely so that every script and hook can read it, which means any process you run can read it too; denying Claude the `security` command that fetches it is a speed bump, not a boundary. The `Stop` hook commits and pushes `docs/` at the end of every turn, so whatever went into the map during a turn you didn't fully read is already on GitHub. And the one scheduled job above runs Claude with no one watching. None of this is an argument against the setup — it is an argument for the two things that actually bound the damage: Time Machine, and reading what the map says changed.
 
 ## Tools
 
@@ -304,6 +312,8 @@ vault/
 
 ## Get started
 
+**0. What you need.** A Mac on a recent macOS — recent enough for Homebrew, so one of the last three releases. Apple silicon or Intel: everything here works on both, except the MacParakeet cask (Apple silicon, macOS 14+), which the Brewfile skips on Intel; without it there is no dictation or transcript pipeline. Nothing in this repo needs a specific macOS version of its own.
+
 **1. Phase 0 checklist** — in a browser, before touching the machine:
 
 - [ ] Claude subscription that includes Claude Code — Pro, or Max (5× or 20× Pro usage). All-day sessions in auto mode outrun Pro quickly; I use Max.
@@ -324,6 +334,8 @@ vault/
 cd ~ && gh repo create system-manager --template narendranag/ai-first-machine-setup --private --clone
 cd ~/system-manager && claude
 ```
+
+Without `--template`: `git clone https://github.com/narendranag/ai-first-machine-setup.git ~/system-manager`, then point `origin` at a private repo of your own.
 
 Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). Then do what it asks: log in, grant, decide.
 
