@@ -40,6 +40,8 @@ Before each numbered phase, tell me in three lines what you are about to do and 
 
 This comes before Bitwarden so the deny rules (no raw `bw get` / `bw list`) are in force from here on.
 
+- **`brew install jq` first.** Every hook in `claude-global/hooks/` parses its stdin with `jq`, and phase 6's `brew bundle` is still several phases away. Link the hooks before `jq` exists and they run without a session id, so the Stop hook can't tell a long turn and the Notification hook sends an empty message.
+
 Link the **contents** of `claude-global/`, not the directory — `~/.claude` also holds session transcripts and state that must never enter a repo:
 
 ```
