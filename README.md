@@ -371,17 +371,20 @@ Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md) — the installer already p
 <details>
 <summary><b>What's in the box</b></summary>
 
-| Path                                                                           | What                                                                                     |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| [`CLAUDE.md`](CLAUDE.md)                                                       | the fleet brain's operating instructions                                                 |
-| [`bin/`](bin)                                                                  | every script — each answers `--help` and uses exit codes                                 |
-| [`claude-global/`](claude-global)                                              | global `CLAUDE.md`, settings, hooks and slash commands, linked into `~/.claude`          |
-| [`Brewfile`](Brewfile) · [`.dev`](Brewfile.dev) · [`.server`](Brewfile.server) | packages by role                                                                         |
-| [`setup-tools.sh`](setup-tools.sh)                                             | what Homebrew can't install                                                              |
-| [`dotfiles/`](dotfiles) · [`macos-defaults.sh`](macos-defaults.sh)             | shell, prompt, Ghostty, git; macOS settings                                              |
-| [`templates/`](templates)                                                      | app scaffolds (web, mobile, cli, desktop) and brains (vault, archive, camera, resources) |
-| [`docs/`](docs)                                                                | first prompt, dev guidelines, secrets, fleet index, decisions, the example machine file  |
-| [`docs/diagrams/render.py`](docs/diagrams/render.py)                           | source for every diagram in this README                                                  |
+| Path                                                                                  | What                                                                                                 |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [`CLAUDE.md`](CLAUDE.md)                                                              | the fleet brain's operating instructions                                                             |
+| [`install.sh`](install.sh)                                                            | the one-liner that puts the operator on a new Mac — [`docs/INSTALL.md`](docs/INSTALL.md) explains it |
+| [`bin/`](bin)                                                                         | every script — each answers `--help` and uses exit codes                                             |
+| [`lib/`](lib)                                                                         | the helpers and exit codes every script sources — `common.sh`, `cc.py`, `google_auth.py`             |
+| [`claude-global/`](claude-global)                                                     | global `CLAUDE.md`, settings, hooks and slash commands, linked into `~/.claude`                      |
+| [`Brewfile`](Brewfile) · [`.dev`](Brewfile.dev) · [`.server`](Brewfile.server)        | packages by role                                                                                     |
+| [`setup-tools.sh`](setup-tools.sh) · [`vscode-extensions.txt`](vscode-extensions.txt) | what Homebrew can't install, and the VS Code extension list it reads                                 |
+| [`dotfiles/`](dotfiles) · [`macos-defaults.sh`](macos-defaults.sh)                    | shell, prompt, Ghostty, git; macOS settings                                                          |
+| [`templates/`](templates)                                                             | app scaffolds (web, mobile, cli, desktop) and brains (vault, archive, camera, resources)             |
+| [`docs/`](docs)                                                                       | first prompt, dev guidelines, secrets, fleet index, decisions, the example machine file              |
+| [`docs/diagrams/render.py`](docs/diagrams/render.py)                                  | source for every diagram in this README                                                              |
+| [`tests/`](tests)                                                                     | what CI runs beyond shellcheck — `install-dry-run.sh` drives `install.sh --dry-run`                  |
 
 </details>
 

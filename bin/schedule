@@ -16,7 +16,7 @@
 #   transcripts-sync on db change     MacParakeet transcriptions → vault/inbox/transcripts (WatchPaths)
 #
 # Logs: ~/Library/Logs/claude-computer/<job>.log
-# Exit codes: 0 ok · 1 launchctl failed · 2 usage / unknown job · 3 not macOS
+# Exit codes: 0 ok · 1 launchctl failed, or this table and JOBS disagree · 2 usage / unknown job · 3 not macOS
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"
@@ -26,6 +26,16 @@ AGENTS="$HOME/Library/LaunchAgents"
 LOGS="$HOME/Library/Logs/claude-computer"
 PREFIX="local.claude-computer"
 JOBS="tasks-sync resources-sync feeds-sync daily-note map-check transcripts-sync"
+
+# The job list lives twice — the table in the header above, which `--help` prints, and JOBS.
+# Two copies drift, so `list` diffs them and fails instead of quietly telling you half the truth.
+check_table() {
+  local from_table from_jobs
+  from_table="$(sed -n '/^# Jobs (/,/^#$/p' "$0" | sed -n 's/^#   \([a-z][a-z-]*\) .*/\1/p' | sort | tr '\n' ' ')"
+  from_jobs="$(printf '%s\n' "$JOBS" | tr ' ' '\n' | sort | tr '\n' ' ')"
+  [ "$from_table" = "$from_jobs" ] || cc_die "$EX_FAIL" \
+    "the header table and JOBS disagree — table: [$from_table] JOBS: [$from_jobs]"
+}
 
 # job → "<schedule>|<command>"; schedule is "interval:<seconds>", "daily:<HH>:<MM>" or "watch:<path>"
 job_def() {
@@ -88,6 +98,7 @@ PLIST
 
 case "${1:-}" in
   list)
+    check_table
     for j in $JOBS; do
       d="$(job_def "$j")"
       s="${d%%|*}"; case "$s" in watch:*) s="on file change" ;; esac

@@ -2,6 +2,7 @@
 # Install: brew bundle --file Brewfile.dev
 
 cask "orbstack"                         # Docker for Python services and self-hosted things
+                                        # deliberately also in Brewfile.server — one role layer per machine
 cask "darktable"                        # RAW processing (library/camera brain)
 cask "calibre"                          # books and comics libraries
 

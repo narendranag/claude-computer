@@ -3,4 +3,5 @@
 # Install: brew bundle --file Brewfile.server
 
 cask "orbstack"                         # containers: Bugsink, self-hosted services
+                                        # deliberately also in Brewfile.dev — one role layer per machine
 brew "cloudflared"                      # Cloudflare Tunnel for services exposed to the internet

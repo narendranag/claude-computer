@@ -19,7 +19,7 @@ All names start with `claude-computer/` (override with `CC_BW_PREFIX`). Create e
 | `claude-computer/r2-crypt`           | Login       | password = crypt password · custom field `salt`                                                                                                | `resources-sync`                               |
 | `claude-computer/google-credentials` | Secure note | notes = the downloaded OAuth client `credentials.json`                                                                                         | `gcal`, `gmail`, `gdrive`                      |
 | `claude-computer/google-token`       | Secure note | written by the first Google wrapper run                                                                                                        | `gcal`, `gmail`, `gdrive`                      |
-| `claude-computer/posthog-<app>`      | Login       | password = project API key                                                                                                                     | apps, via `.envrc`                             |
+| `claude-computer/posthog-<name>`     | Login       | password = project API key                                                                                                                     | apps, via `.envrc`                             |
 
 **Losing `r2-crypt` means losing `~/resources` in R2.** It cannot be recovered from the bucket. Keep Bitwarden's own recovery (emergency access or an export stored offline) in order.
 
