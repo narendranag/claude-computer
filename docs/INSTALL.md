@@ -1,0 +1,149 @@
+# Installing
+
+One command, on a Mac you have just opened:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)"
+```
+
+It puts the operator on the machine — Xcode's Command Line Tools, Homebrew, the GitHub CLI, Claude Code — creates your own private copy of this template, and then stops and tells you the three things only a human can do. It checks what is already there and skips it, so it is safe to run on a machine that is half set up, and safe to run again after one that failed.
+
+## Read it before you run it
+
+You should. It is a shell script from the internet, and the whole premise of this repo is that you stay the one who decides.
+
+```bash
+curl -fsSL https://claude-computer.com/install.sh | less
+```
+
+That URL redirects to [`install.sh`](../install.sh) on `main` in this repo, so there is one source of truth and no separately hosted copy to drift or be tampered with independently. You can fetch it from either address:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/narendranag/claude-computer/main/install.sh)"
+```
+
+And you can see exactly what it would do, changing nothing:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --dry-run
+```
+
+### Why `bash -c "$(curl …)"` and not `curl … | bash`
+
+The pipe form would put the download on standard input, and standard input is where the Homebrew installer reads your password and where `gh auth login` reads your answers. With the script on stdin, both of them hang or fail. The `bash -c "$(…)"` form keeps your terminal attached.
+
+The script checks for this: with no terminal on stdin it prints the right form and exits 2 rather than starting something it cannot finish.
+
+## What it does, in order
+
+Before it changes anything it prints a checklist — `✓` what you have, `→` what it will install, `!` what needs you — and asks once whether to go ahead.
+
+**Preflight.** macOS only (a Linux box exits 3: headless machines are managed from a Mac over SSH, never set up this way). macOS version and chip — the MacParakeet dictation and transcript pipeline is Apple silicon only, and the Brewfile skips it on Intel. Whether `github.com` is reachable, whether there is enough disk, and whether you are an administrator, because Homebrew needs one. Then the state of each component, and the URLs it will fetch.
+
+| Step                      | What happens                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. Command Line Tools** | `xcode-select --install` opens a macOS dialog — you click **Install**. The script then waits, polling until `xcode-select -p`, `git --version` and `clang --version` all work, for up to 30 minutes. It checks all three because a stale developer path after an OS upgrade leaves the first one answering while the other two are broken.                                                                            |
+| **2. Homebrew**           | Runs Homebrew's own installer, interactively, exactly as Homebrew documents it. **It asks for your password** — that is Homebrew, not this script, and it prints everything it is about to do first. Afterwards the script makes `brew` work in its own process, and appends the one `eval "$(… shellenv)"` line Homebrew asks for to `~/.zprofile` if it is not there already, telling you exactly what it appended. |
+| **3. GitHub CLI**         | `brew install gh`. If you are not logged in, `gh auth login` runs and **you** answer it — take the defaults, GitHub.com over HTTPS, authenticate in a browser. This template creates a per-machine SSH key of its own later, during `/setup`; you do not need one now.                                                                                                                                                |
+| **4. Claude Code**        | `brew install --cask claude-code`, unless a Claude Code is already there. It looks for `claude` on `PATH`, the cask, and the native installer at `~/.local/bin/claude` or `~/.claude/local` — if it finds any of them it leaves them alone rather than installing a second copy.                                                                                                                                      |
+| **5. Your private copy**  | `gh repo create claude-computer --template narendranag/claude-computer --private`, then clones it to `~/claude-computer` and verifies `CLAUDE.md`, `docs/FIRST-PROMPT.md` and `.template` are in it. Finally `git config core.hooksPath .githooks`, which arms the gitleaks pre-commit scan. The `upstream` remote is `/setup`'s job, not this script's.                                                              |
+| **6. Hand over**          | Prints the three remaining steps and copies the first prompt to your clipboard, read out of the clone's own `docs/FIRST-PROMPT.md` so it cannot drift from the file in the repo.                                                                                                                                                                                                                                      |
+
+Then you do the rest:
+
+```bash
+cd ~/claude-computer && claude
+```
+
+Log in to Claude Code. Check the status line reads **⏵⏵ auto mode on** — Shift+Tab cycles the modes, and never _bypass permissions_. Paste the first prompt (⌘V; it is already on your clipboard) and let it go.
+
+The script does not start Claude Code for you and passes no permission-mode flag. Choosing the mode is one of the three jobs that stay yours.
+
+## Flags
+
+| Flag             | What it does                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| `--dry-run`      | Print every command it would run. Changes nothing, asks nothing, writes nothing.     |
+| `--yes`          | Do not pause for confirmation.                                                       |
+| `--dir <path>`   | Where the clone goes. Default `$HOME/claude-computer`.                               |
+| `--name <repo>`  | The name of your private repo. Default `claude-computer`.                            |
+| `--public-clone` | Do not create a repo of your own: clone the template read-only, to look at it first. |
+| `--help`         | The usage text.                                                                      |
+| `--version`      | The version, then exit.                                                              |
+
+Flags go after a `--`, because of how `bash -c` assigns arguments — the first word after the script becomes `$0`, so the flags need a placeholder in front of them:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --dry-run --dir ~/work/cc
+```
+
+From a local checkout it is just `./install.sh --dry-run`.
+
+`CC_INSTALL_TEMPLATE` overrides the template slug, for a fork:
+
+```bash
+CC_INSTALL_TEMPLATE=you/your-fork /bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)"
+```
+
+`NO_COLOR` turns colour off; colour is on only when the output is a terminal anyway.
+
+> [!NOTE]
+> The script also reads a set of `CC_INSTALL_TEST_*` variables. Those are for `tests/install-dry-run.sh`, which uses them to simulate a machine without weakening any real check. Do not set them by hand.
+
+## Exit codes
+
+| Code | Meaning                                                                             |
+| ---- | ----------------------------------------------------------------------------------- |
+| 0    | Done, or you answered no at the prompt.                                             |
+| 1    | A step failed. The message says which; re-running is safe.                          |
+| 2    | Bad arguments, or no terminal on stdin.                                             |
+| 3    | Not macOS.                                                                          |
+| 4    | Something that is not a `claude-computer` clone is already at the target directory. |
+| 5    | The Command Line Tools installer did not finish within 30 minutes.                  |
+
+## The equivalent by hand
+
+The script exists to save you these, not to hide them. This is the same install, and it is what the README's Quick start has always said:
+
+```bash
+xcode-select --install
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install gh && gh auth login
+brew install --cask claude-code
+cd ~ && gh repo create claude-computer --template narendranag/claude-computer --private --clone
+cd ~/claude-computer && git config core.hooksPath .githooks && claude
+```
+
+Two differences worth knowing. The Homebrew installer finishes by printing two `eval "$(… shellenv)"` lines — **run them**, or `brew` is not on your `PATH` and the third command fails with `command not found`. And `gh repo create --clone` clones into `./<name>` in whatever directory you are in; the script runs `gh repo create` and `gh repo clone` separately so that `--dir` can point anywhere.
+
+## What it never does
+
+- **Never reads, writes or asks for a credential.** Every login is yours. There is no token, no password and no key anywhere in it.
+- **Never runs `sudo` itself.** Homebrew's installer does, for its own directories, and shows you what it will do before it does it.
+- **Never touches `~/.claude`.** It reads two paths there to avoid installing a second Claude Code, and writes nothing.
+- **Never edits a shell profile** except to append the single `brew shellenv` line to `~/.zprofile`, and only if no `brew shellenv` line is there. It tells you the exact line.
+- **Never downloads anything** but the official Homebrew installer from `raw.githubusercontent.com/Homebrew/install`, your copy of this template from GitHub, and whatever `brew` and `gh` fetch for `gh` and the Claude Code cask. The preflight prints those URLs.
+- **Never phones home.** No telemetry, no analytics, no ping.
+- **Never starts Claude Code, and never sets a permission mode.**
+
+## Troubleshooting
+
+**The Command Line Tools dialog never appeared.** It sometimes opens behind the frontmost window — check Mission Control and the Dock. If `xcode-select --install` said "already installed" but `git --version` fails, the developer path is stale, which is common after a macOS upgrade: `sudo rm -rf /Library/Developer/CommandLineTools` and run the installer again. If the 30-minute wait times out (exit 5), the download is slow rather than stuck — let the dialog finish, then re-run the one-liner; it will see the tools and move on.
+
+**`brew: command not found` after Homebrew installed.** Homebrew does not put itself on your `PATH`; the two lines it prints at the end do. The script appends one of them to `~/.zprofile`, but that only takes effect in a _new_ shell. Open a new terminal tab, or run `eval "$(/opt/homebrew/bin/brew shellenv)"` (Intel: `/usr/local/bin/brew`) in this one. This is why the script probes both prefixes by path rather than trusting `PATH`.
+
+**`gh auth login` in a session with no browser** — over SSH, or in a terminal on a machine with no GUI. Choose "Login with a web browser" anyway and open the URL and code it prints on any other device; or generate a personal access token on github.com and paste it. If the script cannot get you logged in, it stops with exit 1 and everything before it stays done, so re-running picks up from there.
+
+**The repo name is already taken.** If `claude-computer` already exists on your account, the script clones it instead of creating a second one, and says so — that is the documented second-machine path, and it is what you want on machine two. If the name belongs to something unrelated, pass `--name` and `--dir`:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --name my-fleet --dir ~/my-fleet
+```
+
+**Something is already at `~/claude-computer`.** If it is a clone of your instance the script leaves it alone. If it is anything else it stops with exit 4 rather than writing into it — move it aside, or use `--dir`.
+
+**You are not an administrator.** The preflight says so and Homebrew's installer will refuse. Log in as an admin user, or have one run the Homebrew step.
+
+## For the maintainer
+
+`https://claude-computer.com/install.sh` should be a redirect to `https://raw.githubusercontent.com/narendranag/claude-computer/main/install.sh`, not a copy. One source of truth: the file reviewed in this repo is the file people run, and a change to it ships without a second deploy. The script behaves identically fetched from either URL.
