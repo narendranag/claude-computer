@@ -195,6 +195,22 @@ class SVG:
         self.add(f'<circle cx="{x+13}" cy="{y+7}" r="1.5" fill="{c}"/>')
 
 
+# Text in an SVG is drawn, not laid out: nothing stops a label running past the box it sits in,
+# and the only way that has ever been caught here is by looking at a screenshot. So estimate the
+# width — len × size × a generous per-character advance for Inter — and say so at render time.
+EM = 0.58
+WIDE: set[str] = set()
+
+
+def fits(label: str, size: float, room: float, where: str) -> bool:
+    """True if `label` fits in `room` px. Records it for main() to report if it does not."""
+    need = len(label) * size * EM
+    if need > room:
+        WIDE.add(f"{where}: {label!r} needs ~{need:.0f}px, has {room:.0f}px")
+        return False
+    return True
+
+
 def card(svg: SVG, x, y, w, h, fill=None, stroke=None, r=14):
     t = svg.t
     svg.rect(x, y + 1.5, w, h, r=r, fill=t["line"], opacity=0.55)  # soft shadow
@@ -441,10 +457,15 @@ STEPS = [
     (37, 7, "a", "Re-capture", 0), (38, 7, "a", "Steady state", 0),
 ]
 LANES = [("h", "human", "You", "only you can"), ("c", "hand", "Claude + you", "Claude drives, you log in"), ("a", "claude", "Claude", "Claude alone")]
+# A step pill: the number sits at +8, the label at +PILL_LABEL_X, and the label gets at least
+# PILL_PAD before the pill's right edge — the same breathing room it has on its left.
+PILL_LABEL_X, PILL_PAD = 27, 10
 
 
 def draw_build(t: dict) -> str:
-    W, H = 1280, 900
+    # Wider than the other diagrams on purpose: eight columns of labelled pills, and a label
+    # needs the same padding on its right as on its left. See PILL_PAD / fits() below.
+    W, H = 1480, 900
     n_rebuild = sum(1 for st in STEPS if st[4] == 1)
     s = SVG(W, H, t, "The build",
             f"The 38 installation steps in eight phases and three lanes: human only, Claude drives while the human "
@@ -530,7 +551,8 @@ def draw_build(t: dict) -> str:
                     s.rect(x, yy, w, pill_h, r=7, fill=t["card"], stroke=c, sw=1, opacity=None)
                     ink, num_ink = t["ink"], c
                 s.text(x + 8, yy + 16.5, f"{num:>2}", 10.5, 700, num_ink, mono=True)
-                s.text(x + 29, yy + 16.5, label, 11.5, 600, ink)
+                fits(label, 11.5, w - PILL_LABEL_X - PILL_PAD, f"build step {num}")
+                s.text(x + PILL_LABEL_X, yy + 16.5, label, 11.5, 600, ink)
 
     # handover pivot
     s.line(pivot_x, gy - 6, pivot_x, grid_bottom + 8, t["ink"], 2.2)
@@ -723,7 +745,7 @@ def draw_hero(t: dict) -> str:
             "the template — and then the handover: cd into that copy, start Claude Code, paste the first prompt. "
             "Beside it, the list of what Claude Code then sets up: machine map, keys, Tailscale, Bitwarden, hooks, "
             "Brewfiles, brains, workflows. The four commands can still be typed by hand.")
-    s.text(48, 78, "ai-first machine setup", 12, 700, t["accent"], ls="0.16em", upper=True)
+    s.text(48, 78, "claude-computer", 12, 700, t["accent"], ls="0.16em", upper=True)
     s.text(46, 136, "Install the", 48, 700, ls="-0.02em")
     s.text(46, 188, "operator first.", 48, 700, ls="-0.02em")
     for i, ln in enumerate(["Paste one command. Claude Code sets up and", "runs everything else on your machines."]):
@@ -787,6 +809,12 @@ def main() -> int:
             # SVG.render uses the final height; re-apply it to the viewBox/height attributes.
             (OUT / f"{name}{suffix}.svg").write_text(svg, encoding="utf-8")
     print("render.py: wrote", ", ".join(sorted(p.name for p in OUT.glob("*.svg"))))
+    if WIDE:
+        print("\nrender.py: LABELS TOO WIDE FOR THEIR BOXES — widen the box or shorten the label:",
+              file=sys.stderr)
+        for w in sorted(WIDE):
+            print(f"  {w}", file=sys.stderr)
+        return 1
     return 0
 
 
