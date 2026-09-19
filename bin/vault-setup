@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+# vault-setup — create the Obsidian vault and install the plugins the vault brain depends on.
+#
+# Usage:
+#   vault-setup [--vault DIR] [--upgrade] [--create-remote] [--dry-run]
+#
+#   --vault DIR       where the vault lives (default $CC_VAULT, else ~/vault)
+#   --upgrade         re-fetch the plugins even if they are already installed
+#   --create-remote   also `gh repo create <name> --private --source … --push`
+#                     Never implicit: it publishes your notes to GitHub. Refuses if a repo of
+#                     that name already exists and is public.
+#   --dry-run         print every step, download nothing, write nothing
+#
+# Idempotent. Three steps:
+#   1. the vault — copies templates/vault/ into place, `git init`, the gitleaks pre-commit
+#      hook, first commit. An existing vault keeps its content; only the plugins and the
+#      config below are touched. A directory that is not a vault is left alone and refused.
+#   2. the plugins — obsidian-git (sync), dataview (queries over frontmatter) and
+#      templater-obsidian (the _templates/), the three templates/vault/CLAUDE.md names. Each
+#      repo is looked up by id in Obsidian's own registry —
+#      https://github.com/obsidianmd/obsidian-releases (community-plugins.json) — and
+#      main.js / manifest.json / styles.css come from that repo's latest GitHub release.
+#      THIS IS THIRD-PARTY CODE, AND OBSIDIAN RUNS IT WITH YOUR VAULT OPEN. Every source URL
+#      and version is printed as it is fetched and recorded in
+#      <vault>/.obsidian/plugins/VERSIONS.md. Read the registry entry and the repo before you
+#      trust them; nothing is installed that is not named here.
+#   3. the config — `.obsidian/community-plugins.json` gains the three ids (merged, never
+#      replaced). Defaults for Templater, daily notes, new-note location and Obsidian Git are
+#      written only when the file does not exist yet, so your own settings always win.
+#
+# Two things no script can do, printed again at the end: turning off Obsidian's restricted
+# mode (Settings → Community plugins → Turn on community plugins) and the Web Clipper
+# browser extension.
+#
+# Exit codes: 0 ok · 1 a step failed · 2 usage / the directory is not a vault · 3 missing tool
+#             5 no templates/vault in this repo
+set -euo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+cc_wants_help "$@"
+
+REGISTRY="${CC_OBSIDIAN_REGISTRY:-https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json}"
+GITHUB_API="${CC_GITHUB_API:-https://api.github.com}"
+GITHUB_DL="${CC_GITHUB_DL:-https://github.com}"
+PLUGINS="obsidian-git dataview templater-obsidian"
+
+vault="${CC_VAULT:-$HOME/vault}"
+upgrade=0; create_remote=0; dry=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --vault) vault="${2:?}"; shift 2 ;;
+    --upgrade) upgrade=1; shift ;;
+    --create-remote) create_remote=1; shift ;;
+    --dry-run) dry=1; shift ;;
+    *) cc_usage >&2; exit "$EX_USAGE" ;;
+  esac
+done
+
+cc_need git jq curl
+tpl="$CC_ROOT/templates/vault"
+[ -d "$tpl" ] || cc_die "$EX_CONFIG" "no vault template at $tpl"
+
+step() { cc_info "→ $*"; }
+say()  { printf '  %s\n' "$*" >&2; }
+do_()  { if [ "$dry" -eq 1 ]; then printf '  would run: %s\n' "$*" >&2; else "$@"; fi; }
+
+# Everything downloaded lands in $WORK first and is moved into place only once it has been
+# checked — so a failed download is never a half-installed plugin. For a real run that is
+# inside the vault, where the move is a rename on one filesystem; a dry run must not create
+# anything there at all, so it borrows a temporary directory instead.
+if [ "$dry" -eq 1 ]; then
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/vault-setup.XXXXXX")"
+else
+  WORK="$vault/.obsidian/.vault-setup.$$"
+fi
+cleanup() { [ -d "$WORK" ] && rm -rf "$WORK"; return 0; }
+trap cleanup EXIT INT TERM
+
+# ---- 1. the vault --------------------------------------------------------
+# A vault is a directory with Obsidian's config, a git repo or the brain in it. An empty
+# directory is not yet anything, so it is filled like a new one.
+looks_like_vault() {
+  [ -d "$1/.obsidian" ] || [ -d "$1/.git" ] || [ -f "$1/CLAUDE.md" ]
+}
+is_empty_dir() {
+  [ -z "$(ls -A "$1" 2>/dev/null)" ]
+}
+
+fresh=0
+if [ -e "$vault" ] && [ ! -d "$vault" ]; then
+  cc_die "$EX_USAGE" "$vault exists and is not a directory — nothing was changed"
+elif [ ! -e "$vault" ] || is_empty_dir "$vault"; then
+  fresh=1
+  step "create the vault at $vault from templates/vault"
+  if [ "$dry" -eq 1 ]; then
+    say "would copy $tpl/. → $vault/, git init -b main, install the gitleaks pre-commit hook"
+  else
+    mkdir -p "$vault"
+    cp -R "$tpl/." "$vault/"
+    git -C "$vault" rev-parse --git-dir >/dev/null 2>&1 || git -C "$vault" init -q -b main
+    cp "$CC_ROOT/.githooks/pre-commit" "$vault/.git/hooks/pre-commit"
+    chmod +x "$vault/.git/hooks/pre-commit"
+  fi
+elif ! looks_like_vault "$vault"; then
+  cc_die "$EX_USAGE" "$vault exists but is not a vault (no .obsidian, .git or CLAUDE.md in it). Move it aside, or pass --vault elsewhere — nothing was changed"
+else
+  step "vault at $vault exists — keeping every note, checking plugins and config"
+fi
+
+# The plugin binaries are downloaded, not authored, so they are not the vault repo's business:
+# vault-setup restores them on a second machine. templates/vault/.gitignore says so for a new
+# vault; an older one gets the lines appended, once.
+ensure_gitignore() {
+  local gi="$vault/.gitignore" marker=".obsidian/plugins/*/main.js"
+  [ -f "$gi" ] && grep -qF "$marker" "$gi" && return 0
+  if [ "$dry" -eq 1 ]; then say "would add the plugin-binary lines to $gi"; return 0; fi
+  say "adding the plugin-binary lines to .gitignore (manifest.json and data.json stay in the repo)"
+  {
+    echo ""
+    echo "# Plugin code is downloaded, not authored: vault-setup restores it. See VERSIONS.md."
+    echo ".obsidian/plugins/*/main.js"
+    echo ".obsidian/plugins/*/styles.css"
+    echo ".obsidian/plugins/*/*.js.map"
+  } >> "$gi"
+}
+ensure_gitignore
+
+# ---- 2. the plugins ------------------------------------------------------
+gh_api_ok=0
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then gh_api_ok=1; fi
+
+registry=""
+fetch_registry() {
+  [ -n "$registry" ] && return 0
+  local r="$WORK/community-plugins.json"
+  mkdir -p "$WORK"
+  curl -fsSL --max-time "${CC_HTTP_TIMEOUT:-60}" "$REGISTRY" -o "$r" ||
+    cc_die "$EX_FAIL" "could not read Obsidian's plugin registry: $REGISTRY"
+  jq -e 'type == "array"' "$r" >/dev/null 2>&1 ||
+    cc_die "$EX_FAIL" "the plugin registry did not parse as a JSON array: $REGISTRY"
+  registry="$r"
+}
+
+# The registry decides which repo an id belongs to. These fallbacks exist only for the day it
+# cannot be read, and what they return is checked against the manifest id like anything else.
+fallback_repo() {
+  case "$1" in
+    obsidian-git)       echo "Vinzent03/obsidian-git" ;;
+    dataview)           echo "blacksmithgu/obsidian-dataview" ;;
+    templater-obsidian) echo "SilentVoid13/Templater" ;;
+    *) echo "" ;;
+  esac
+}
+
+plugin_repo() {
+  local id="$1" repo=""
+  fetch_registry
+  repo="$(jq -r --arg id "$id" '.[] | select(.id == $id) | .repo' "$registry" | head -1)"
+  [ -n "$repo" ] && [ "$repo" != "null" ] || repo="$(fallback_repo "$id")"
+  [ -n "$repo" ] || cc_die "$EX_FAIL" "plugin id '$id' is not in the registry and has no fallback"
+  printf '%s' "$repo"
+}
+
+latest_tag() {
+  local repo="$1" json=""
+  # `gh api` is authenticated, so it is not held to the 60-an-hour anonymous rate limit.
+  if [ "$gh_api_ok" -eq 1 ]; then json="$(gh api "repos/$repo/releases/latest" 2>/dev/null || true)"; fi
+  if [ -z "$json" ]; then
+    json="$(curl -fsSL --max-time "${CC_HTTP_TIMEOUT:-60}" "$GITHUB_API/repos/$repo/releases/latest" || true)"
+  fi
+  printf '%s' "$json" | jq -r '.tag_name // empty' 2>/dev/null || true
+}
+
+installed_version() {
+  [ -f "$1/manifest.json" ] || return 1
+  jq -r '.version // "?"' "$1/manifest.json" 2>/dev/null
+}
+
+install_plugin() {
+  local id="$1" dir repo tag base tmp have mid f
+  dir="$vault/.obsidian/plugins/$id"
+
+  if have="$(installed_version "$dir")" && [ "$upgrade" -eq 0 ]; then
+    say "$id $have — already installed (--upgrade re-fetches)"
+    return 0
+  fi
+
+  repo="$(plugin_repo "$id")"
+  tag="$(latest_tag "$repo")"
+  [ -n "$tag" ] || cc_die "$EX_FAIL" "no latest release for $repo (rate-limited? \`gh auth login\` raises the limit)"
+  base="$GITHUB_DL/$repo/releases/download/$tag"
+  say "$id $tag ← $base/{main.js,manifest.json,styles.css}"
+
+  if [ "$dry" -eq 1 ]; then
+    say "  third-party code — a dry run downloads nothing"
+    return 0
+  fi
+
+  mkdir -p "$WORK"
+  tmp="$WORK/$id"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  for f in main.js manifest.json; do
+    curl -fsSL --max-time "${CC_HTTP_TIMEOUT:-60}" "$base/$f" -o "$tmp/$f" ||
+      cc_die "$EX_FAIL" "could not download $base/$f — nothing installed for $id"
+  done
+  # styles.css is optional: not every plugin ships one.
+  curl -fsSL --max-time "${CC_HTTP_TIMEOUT:-60}" "$base/styles.css" -o "$tmp/styles.css" 2>/dev/null ||
+    rm -f "$tmp/styles.css"
+
+  jq -e . "$tmp/manifest.json" >/dev/null 2>&1 ||
+    cc_die "$EX_FAIL" "$id: manifest.json from $base did not parse — nothing installed"
+  mid="$(jq -r '.id // empty' "$tmp/manifest.json" 2>/dev/null || true)"
+  [ "$mid" = "$id" ] ||
+    cc_die "$EX_FAIL" "$id: the manifest at $base says id '$mid' — refusing to install it"
+
+  # Where it came from, beside what came: the provenance of code nobody wrote here.
+  jq -n --arg repo "$repo" --arg tag "$tag" --arg url "$base" --arg on "$(date -u +%Y-%m-%d)" \
+    '{repo: $repo, tag: $tag, url: $url, fetched: $on}' > "$tmp/.source.json"
+
+  mkdir -p "$vault/.obsidian/plugins"
+  rm -rf "$dir"
+  mv "$tmp" "$dir"
+  say "  installed $id $(installed_version "$dir") from $repo $tag"
+}
+
+step "plugins → $vault/.obsidian/plugins — third-party code Obsidian runs; registry: $REGISTRY"
+for p in $PLUGINS; do install_plugin "$p"; done
+
+# What is running in this vault and where it came from, regenerated from the files on disk.
+write_versions() {
+  local out="$vault/.obsidian/plugins/VERSIONS.md" tmp id dir src
+  tmp="$out.tmp.$$"
+  mkdir -p "$vault/.obsidian/plugins"
+  {
+    echo "# Obsidian plugins in this vault"
+    echo
+    echo "Generated by \`vault-setup\`; do not hand-edit. Re-fetch with \`vault-setup --upgrade\`."
+    echo
+    echo "Each of these is third-party code, and Obsidian runs it with this vault open. The repo"
+    echo "for every id comes from Obsidian's registry,"
+    echo "<$REGISTRY>,"
+    echo "and the files from that repo's latest GitHub release."
+    echo
+    echo "| Plugin | Version | Repo | Release | Fetched |"
+    echo "| ------ | ------- | ---- | ------- | ------- |"
+    for id in $PLUGINS; do
+      dir="$vault/.obsidian/plugins/$id"
+      if [ -f "$dir/manifest.json" ]; then
+        src="$dir/.source.json"
+        if [ -f "$src" ]; then
+          printf '| %s | %s | %s | %s | %s |\n' "$id" "$(installed_version "$dir")" \
+            "$(jq -r '.repo' "$src")" "$(jq -r '.tag' "$src")" "$(jq -r '.fetched' "$src")"
+        else
+          printf '| %s | %s | — | — | before vault-setup |\n' "$id" "$(installed_version "$dir")"
+        fi
+      else
+        printf '| %s | not installed | — | — | — |\n' "$id"
+      fi
+    done
+  } > "$tmp"
+  mv "$tmp" "$out"
+}
+if [ "$dry" -eq 1 ]; then
+  say "would write $vault/.obsidian/plugins/VERSIONS.md"
+else
+  write_versions
+fi
+
+# ---- 3. the config ------------------------------------------------------
+# Two rules: community-plugins.json is merged, never replaced; every other file is written
+# only when it does not exist, so a setting changed in Obsidian is never clobbered.
+write_json() { # write_json <path> <json>
+  local path="$1" json="$2" tmp
+  if [ "$dry" -eq 1 ]; then printf '  would write %s: %s\n' "$path" "$json" >&2; return 0; fi
+  mkdir -p "$(dirname "$path")"
+  tmp="$path.tmp.$$"
+  printf '%s\n' "$json" | jq . > "$tmp"
+  mv "$tmp" "$path"
+}
+
+write_json_if_absent() { # write_json_if_absent <path> <json> <what>
+  if [ -f "$1" ]; then say "$3: keeping the $(basename "$1") you already have"; return 0; fi
+  say "$3: writing $(basename "$1")"
+  write_json "$1" "$2"
+}
+
+step "config → $vault/.obsidian — your settings win; only community-plugins.json is merged"
+
+cpj="$vault/.obsidian/community-plugins.json"
+ids="$(jq -nc --arg s "$PLUGINS" '$s | split(" ")')"
+if [ -f "$cpj" ] && jq -e 'type == "array"' "$cpj" >/dev/null 2>&1; then
+  merged="$(jq -c --argjson add "$ids" '. + ($add - .)' "$cpj")"
+  say "enabled plugins: merged the three ids into your community-plugins.json → $merged"
+else
+  merged="$ids"
+  say "enabled plugins: $merged"
+fi
+write_json "$cpj" "$merged"
+
+# Templater: the templates are in _templates/, and it does not fire on file creation — Claude
+# and the scripts write notes directly, and a template inserting itself into every new file
+# would fight them.
+write_json_if_absent "$vault/.obsidian/plugins/templater-obsidian/data.json" \
+  '{"templates_folder":"_templates","trigger_on_file_creation":false,"syntax_highlighting":true}' \
+  "Templater"
+
+# Daily notes (a core plugin): daily/YYYY-MM-DD.md from _templates/daily. `autorun: false` —
+# the scheduled daily-note job drafts the note, not the app being opened.
+write_json_if_absent "$vault/.obsidian/daily-notes.json" \
+  '{"folder":"daily","format":"YYYY-MM-DD","template":"_templates/daily","autorun":false}' \
+  "Daily notes"
+
+# New notes land in inbox/, which is where /inbox files from.
+write_json_if_absent "$vault/.obsidian/app.json" \
+  '{"newFileLocation":"folder","newFileFolderPath":"inbox","attachmentFolderPath":"inbox/attachments","alwaysUpdateLinks":true}' \
+  "App"
+
+# Obsidian Git, deliberately conservative. The vault brain has Claude committing after each
+# job ("Commit after each job: inbox: filed 6 notes"), so the plugin must not commit on a
+# timer underneath it: every interval is 0. It pulls when the vault opens, which is what a
+# second machine needs, and pushes when you ask it to from the command palette.
+write_json_if_absent "$vault/.obsidian/plugins/obsidian-git/data.json" \
+  '{"autoSaveInterval":0,"autoPushInterval":0,"autoPullInterval":0,"autoPullOnBoot":true,"disablePush":false,"pullBeforePush":true,"commitMessage":"vault: obsidian {{date}}","commitDateFormat":"YYYY-MM-DD HH:mm:ss"}' \
+  "Obsidian Git"
+
+# ---- first commit (a fresh vault only) ----------------------------------
+if [ "$fresh" -eq 1 ]; then
+  step "first commit"
+  if [ "$dry" -eq 1 ]; then
+    say "would git add -A and commit"
+  else
+    git -C "$vault" add -A
+    git -C "$vault" commit -q -m "chore: vault from the claude-computer template, with its plugins" ||
+      cc_die "$EX_FAIL" "the first commit failed (is gitleaks installed and a git identity set?)"
+  fi
+fi
+
+# ---- --create-remote ----------------------------------------------------
+if [ "$create_remote" -eq 1 ]; then
+  cc_need gh
+  name="$(basename "$vault")"
+  step "gh repo create $name --private --source $vault --push"
+  vis="$(gh repo view "$name" --json visibility --jq .visibility 2>/dev/null || true)"
+  case "$vis" in
+    PUBLIC)
+      cc_die "$EX_FAIL" "a repo named '$name' already exists on GitHub and is PUBLIC. The vault is your notes — refusing to push it there. Rename one of the two" ;;
+    PRIVATE)
+      say "$name exists already and is private — pushing to it instead of creating it"
+      if [ "$dry" -eq 1 ]; then
+        say "would add origin and push"
+      else
+        git -C "$vault" remote get-url origin >/dev/null 2>&1 ||
+          git -C "$vault" remote add origin "$(gh repo view "$name" --json sshUrl --jq .sshUrl)"
+        git -C "$vault" push -u origin HEAD
+      fi ;;
+    *)
+      do_ gh repo create "$name" --private --source "$vault" --remote origin --push ;;
+  esac
+fi
+
+# ---- what nobody can script --------------------------------------------
+cc_info ""
+cc_info "Two manual steps, neither scriptable:"
+cc_info "  1. Restricted mode. Open the vault in Obsidian, then Settings → Community plugins →"
+cc_info "     Turn on community plugins. Obsidian asks this the first time a vault is opened and"
+cc_info "     keeps the answer to itself; the three plugins are already listed as enabled and"
+cc_info "     load as soon as it is off."
+cc_info "  2. Obsidian Web Clipper is a browser extension: https://obsidian.md/clipper"
+cc_info "     One setting matters — save clips into inbox/ in this vault."
+step "done: $vault"
