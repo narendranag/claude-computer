@@ -1,6 +1,6 @@
 ---
 type: note
-created: 
+created:
 tags: [inbox]
 source: dictation
 ---

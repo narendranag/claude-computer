@@ -6,17 +6,17 @@ System context: `~/claude-computer/docs/`. Tasks are **not** kept here — see R
 
 ## Shape
 
-| Folder | What goes in | Who writes |
-|---|---|---|
-| `inbox/` | everything lands here: web clips, quick notes; `quick.md` for short dictation | anyone; Claude empties it (`/inbox`) |
-| `inbox/transcripts/` | one note per recording: meetings, files, URLs, podcasts (`type: transcript`, `status: unprocessed`) | `transcripts-sync`, `macparakeet-cli`; Claude processes them (`/transcripts`) |
-| `daily/` | one note per day, `YYYY-MM-DD.md`, drafted from tasks | scheduled draft + `/today`; the human adds |
-| `notes/` | **flat.** atomic ideas, meeting notes, decisions. No subfolders. | Claude files, the human writes |
-| `people/` | one note per person who keeps coming up | Claude |
-| `projects/` | one hub note per brain (`<name>.md`) | the human writes the top; `tasks-sync` owns the Tasks block |
-| `sources/` | articles, book notes; `sources/feeds/` daily digests; `sources/transcripts/` processed raw transcripts | Claude, `feeds-sync` |
-| `maps/` | maps of content, `tasks.md`, weekly reviews | Claude, `tasks-sync` |
-| `_templates/` | Templater templates | rarely changed |
+| Folder               | What goes in                                                                                           | Who writes                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `inbox/`             | everything lands here: web clips, quick notes; `quick.md` for short dictation                          | anyone; Claude empties it (`/inbox`)                                          |
+| `inbox/transcripts/` | one note per recording: meetings, files, URLs, podcasts (`type: transcript`, `status: unprocessed`)    | `transcripts-sync`, `macparakeet-cli`; Claude processes them (`/transcripts`) |
+| `daily/`             | one note per day, `YYYY-MM-DD.md`, drafted from tasks                                                  | scheduled draft + `/today`; the human adds                                    |
+| `notes/`             | **flat.** atomic ideas, meeting notes, decisions. No subfolders.                                       | Claude files, the human writes                                                |
+| `people/`            | one note per person who keeps coming up                                                                | Claude                                                                        |
+| `projects/`          | one hub note per brain (`<name>.md`)                                                                   | the human writes the top; `tasks-sync` owns the Tasks block                   |
+| `sources/`           | articles, book notes; `sources/feeds/` daily digests; `sources/transcripts/` processed raw transcripts | Claude, `feeds-sync`                                                          |
+| `maps/`              | maps of content, `tasks.md`, weekly reviews                                                            | Claude, `tasks-sync`                                                          |
+| `_templates/`        | Templater templates                                                                                    | rarely changed                                                                |
 
 ## Frontmatter — every note
 
@@ -24,10 +24,10 @@ System context: `~/claude-computer/docs/`. Tasks are **not** kept here — see R
 type: note | person | project | source | transcript | daily | map
 created: YYYY-MM-DD
 tags: []
-status: active | done | archived        # when it applies
-people: []                              # [[links]]
-project: ""                             # hub name
-source: ""                              # url, book, "dictation", "clipper", "feeds-sync"
+status: active | done | archived # when it applies
+people: [] # [[links]]
+project: "" # hub name
+source: "" # url, book, "dictation", "clipper", "feeds-sync"
 ```
 
 Enforce it when filing. Fix it when you see it wrong.

@@ -1,12 +1,12 @@
 ---
 host: example-laptop
-role: client            # client | server | build | nas | pi
-kind: manager           # manager (has a clone + Claude Code) | headless
+role: client # client | server | build | nas | pi
+kind: manager # manager (has a clone + Claude Code) | headless
 os: macOS 26
 brewfile_layers: [base, dev]
 tailscale_name: example-laptop
-ssh: off                # off | tailscale-ssh | openssh-key-only
-managed_by: self        # self, or the manager hosts that touch this box
+ssh: off # off | tailscale-ssh | openssh-key-only
+managed_by: self # self, or the manager hosts that touch this box
 updated: 2026-01-01
 ---
 
