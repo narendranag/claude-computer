@@ -1,0 +1,3 @@
+# Scaffold sources: __NAME__ is a literal placeholder that bin/new-app substitutes.
+# Prettier reads it as bold and rewrites it to **NAME**, which breaks every scaffold.
+templates/
