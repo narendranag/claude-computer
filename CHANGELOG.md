@@ -6,6 +6,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+One private repo, shared by every machine you own — said once properly, and made hard to get wrong.
+
+### Added
+
+- `install.sh` asks one question when you give it no flags: what your private repo should be called, with `claude-computer` as the Enter answer. So the plain one-liner works for everyone and nobody has to know about `--name` first. If `gh` is already logged in it looks before it asks: an existing private `<you>/claude-computer` is offered as the default and named ("this machine will join that fleet"), and one that cannot be an instance — the template, or the public fork every contributor has — is named as unusable, not offered, and `sys-admin` suggested instead. A dry run with a terminal asks it too: a question changes nothing, and seeing the real name in the plan is the point of a dry run. `--yes`, `--name` and a run with no terminal never ask.
+- A name that fails the suitability gate is a question rather than a wall. When the repo turns out to be a template or public — which can only be known after `gh auth login`, halfway through a run — an interactive run explains and asks for another name, up to three times. `--name` and scripted runs still exit 6, unchanged.
+- The installer says which file this machine will be in the shared repo: `docs/machines/<host>.md`, from `scutil --get LocalHostName`, on both the create and the clone path. A hostname macOS made up ("Someones-MacBook-Pro", or anything very long) gets a note that machines are identified by hostname, not by repo name, and the one command that changes it — `sudo scutil --set LocalHostName mini`, which is the human's to run.
+- [`docs/INSTALL.md`](docs/INSTALL.md#one-repo-for-the-whole-fleet) gains **One repo for the whole fleet**: why the fleet shares one private repo, the commands for machine one and machine two, the forked-contributor case, where per-machine identity comes from, why the directory is the same everywhere, and how to recover from two repos or a clone in the wrong place.
+- `/setup` phase 1 shows the hostname and waits for a confirm-or-rename before it writes `docs/machines/<host>.md`, and says how many machines the repo already knows — on a second machine, the fleet this one is joining. The first prompt carries the same confirmation, in `docs/FIRST-PROMPT.md` and its byte-identical copy in the README.
+
+### Changed
+
+- **`--dir` defaults to `$HOME/claude-computer` whatever `--name` says.** It was `$HOME/$NAME`, so `--name sys-admin` quietly cloned to `~/sys-admin` — where the hooks' `CC_HOME` fallback, every `~/claude-computer/bin/…` rule in `claude-global/settings.json` and `/setup`'s own "`pwd` must be `~/claude-computer`" all stop pointing at anything. An _ask_ rule that matches nothing fails open, so the prompt you meant to get would not arrive. The directory is load-bearing; the repo name is not. Only an explicit `--dir` moves the clone now, and the preflight prints `repo: <owner>/<name> · directory: ~/claude-computer` so the two are never confused.
+- The exit-6 messages suggest `--name sys-admin --dir ~/claude-computer` instead of `--name my-claude-computer`, and say to use the same name on every machine.
+- The README's Quick start says what the question is and what the answer means: one repo for every machine, a second machine runs the same command and clones it. "The brain" ties a machine's identity to its hostname rather than the repo name. The second-machine paragraph is "the same install command", with `gh repo clone` kept as the by-hand alternative.
+- `CONTRIBUTING.md` says that a fork is public and is not an instance, and how to make one that is.
+- `tests/install-dry-run.sh` covers thirty-seven simulated machines, up from twenty-two: `--name` alone leaving the directory at `~/claude-computer`, an explicit `--dir` still winning, a second machine with the same `--name` taking the clone path, the repo-name question in ten shapes (the default, a name of your own, unusable names, an existing instance offered, a public fork not offered, `--yes` and no-terminal never asking, the re-ask after a failed gate, `--name` still exiting 6), and the hostname note firing only on a name macOS made up.
+
 ## [0.3.0] — 2026-09-19
 
 One pasted command instead of four, a vault that is created rather than assumed, and a README that says who this is for.
