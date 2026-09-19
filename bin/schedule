@@ -10,7 +10,8 @@
 #   tasks-sync       hourly           vault task copies
 #   resources-sync   hourly           encrypted two-way sync of ~/resources
 #   feeds-sync       daily 06:00      reading digest
-#   daily-note       daily 06:30      draft today's note with `claude -p` (no edits outside ~/vault)
+#   daily-note       daily 06:30      draft today's note with `claude -p`, unattended: the vault is
+#                                     the working directory and --allowedTools is read/edit + git commit
 #   map-check        daily 09:00      drift report → tg-send only when there is drift
 #   transcripts-sync on db change     MacParakeet transcriptions → vault/inbox/transcripts (WatchPaths)
 #
@@ -33,8 +34,14 @@ job_def() {
     tasks-sync)     echo "interval:3600|$b/tasks-sync" ;;
     resources-sync) echo "interval:3600|$b/resources-sync" ;;
     feeds-sync)     echo "daily:06:00|$b/feeds-sync" ;;
-    daily-note)     echo "daily:06:30|cd \$HOME/vault && claude -p 'Draft today'\"'\"'s daily note per /today steps 1-2 only. Edit only files in ~/vault. Commit the vault.' --permission-mode auto" ;;
-    map-check)      echo "daily:09:00|$b/map-check >/tmp/sm-map-check.txt 2>&1 || $b/tg-send < /tmp/sm-map-check.txt" ;;
+    # The one job that runs Claude with nobody watching, so it is fenced in twice:
+    # the working directory is the vault (Claude's workspace, and the only tree it may
+    # edit), and --allowedTools is the shortest list that can draft and commit a note.
+    # Anything not listed — every other Bash command, WebFetch, Task — is refused
+    # outright, and there is no terminal to approve it.
+    daily-note)     echo "daily:06:30|cd \$HOME/vault && claude -p 'Draft the daily note for today, per /today steps 1-2 only. Edit only files under ~/vault. Commit the vault.' --permission-mode auto --allowedTools 'Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git add:*),Bash(git commit:*)'" ;;
+    # A private per-run file, not a fixed /tmp path any other user could pre-create.
+    map-check)      echo "daily:09:00|t=\$(mktemp -t sm-map-check) || exit 1; trap 'rm -f \"\$t\"' EXIT; $b/map-check >\"\$t\" 2>&1 || $b/tg-send <\"\$t\"" ;;
     transcripts-sync) echo "watch:$HOME/Library/Application Support/MacParakeet/macparakeet.db|$b/transcripts-sync" ;;
     *) return 1 ;;
   esac
