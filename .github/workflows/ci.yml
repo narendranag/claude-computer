@@ -65,6 +65,12 @@ jobs:
       - name: install.sh dry-run matrix
         run: ./tests/install-dry-run.sh
 
+      # vault-setup downloads third-party plugin code, so its stubs answer for curl and gh and
+      # nothing here reaches the network. git is real; gitleaks is a stub that passes, because
+      # the runner has none and the vault's pre-commit hook needs one.
+      - name: vault-setup matrix
+        run: ./tests/vault-setup.sh
+
       - name: --help works
         run: |
           set -euo pipefail
