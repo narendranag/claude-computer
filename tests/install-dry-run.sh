@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
-# tests/install-dry-run.sh — drive install.sh through six simulated machines, in --dry-run.
+# tests/install-dry-run.sh — drive install.sh through thirteen simulated machines.
 #
 # Usage: ./tests/install-dry-run.sh
 #
 # Every case builds a temporary PATH of stub executables and points the installer's
 # CC_INSTALL_TEST_* probes at temporary files, so nothing on the real machine is read or
-# written. Each stub appends its own invocation to $CC_STUB_LOG, which lets the last
-# assertion in each case be the important one: in --dry-run, no mutating command ran.
+# written. Each stub appends its own invocation to $CC_STUB_LOG, which carries the two
+# assertions that matter most: in --dry-run no mutating command ran, and before the Command
+# Line Tools are installed no /usr/bin Xcode shim was invoked.
+#
+# Cases (i)–(ix) and (xiii) are dry runs. (x)–(xii) are not: they exercise the post-clone
+# wait, which only happens for real. Every command still goes to a stub there, `sleep`
+# included, so the 60-second poll costs nothing.
 #
 # Cases: (i) nothing installed · (ii) everything installed and authed · (iii) brew present
 # but not on PATH · (iv) an existing clone at --dir · (v) stdin is not a terminal ·
 # (vi) Linux · (vii) bad arguments · (viii) the first prompt extracts from the real
-# docs/FIRST-PROMPT.md.
+# docs/FIRST-PROMPT.md · (ix) a stale developer path never touches the shim · (x) the
+# template copy lands on the third poll · (xi) it never lands · (xii) resuming the empty
+# clone that left behind · (xiii) gh is owner-qualified.
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -73,11 +80,19 @@ exit 127
 EOF
 }
 
+# stub_clt <bindir> <devdir> — a machine that HAS the tools. install.sh checks the developer
+# directory on disk before it dares execute git or clang, so the fake xcode-select has to
+# point at a directory that really holds them. A hard-coded /Library/Developer path would
+# pass on a developer's Mac and fail on CI, which is the bug this argument prevents.
 stub_clt() {
-  local d="$1"
-  stub "$d" xcode-select <<'EOF'
-case "$1" in
-  -p) echo /Library/Developer/CommandLineTools; exit 0 ;;
+  local d="$1" dev="$2"
+  mkdir -p "$dev/usr/bin"
+  printf '#!/bin/sh\nexit 0\n' > "$dev/usr/bin/git"
+  printf '#!/bin/sh\nexit 0\n' > "$dev/usr/bin/clang"
+  chmod +x "$dev/usr/bin/git" "$dev/usr/bin/clang"
+  stub "$d" xcode-select <<EOF
+case "\$1" in
+  -p) echo "$dev"; exit 0 ;;
   --install) echo "xcode-select: note: Command Line Tools are already installed" >&2; exit 1 ;;
 esac
 exit 0
@@ -151,6 +166,21 @@ assert_no_mutation() { # assert_no_mutation <logfile>
   log_lacks "$1" "curl -fsSL https://raw.githubusercontent.com/Homebrew/install"
 }
 
+# On a Mac without the Command Line Tools, /usr/bin/git, /usr/bin/clang and /usr/bin/python3
+# are one shim binary that opens the "install developer tools" GUI dialog when *invoked*.
+# Before step 1 has finished, install.sh must not execute any of them — a dialog during
+# preflight, or during a --dry-run that promised to ask nothing, is the bug this catches.
+assert_no_shim_invoked() { # assert_no_shim_invoked <logfile>
+  local t
+  for t in git clang python3 make; do
+    if grep -q "^$t " "$1" 2>/dev/null; then
+      bad "POPPED THE XCODE DIALOG: ran $t before the tools were installed"
+    else
+      ok "never invoked the $t shim"
+    fi
+  done
+}
+
 banner() { printf '\n%s\n' "== $1"; }
 
 # --------------------------------------------------------------------------
@@ -173,13 +203,15 @@ contains "$D/out" "gh repo create claude-computer --template narendranag/claude-
 contains "$D/out" "dry run — nothing on this machine will change."
 absent   "$D/out" "Proceed?"
 if [ -e "$D/zprofile" ]; then bad "dry run wrote the zprofile"; else ok "left the zprofile alone"; fi
+contains "$D/out" "git identity — checked once the Command Line Tools are in"
 assert_no_mutation "$CC_STUB_LOG"
+assert_no_shim_invoked "$CC_STUB_LOG"
 
 # --------------------------------------------------------------------------
 banner "(ii) everything installed and authed"
 D="$WORK/ii"; mkdir -p "$D/bin"
 export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
-stub_clt "$D/bin"; stub_pbcopy "$D/bin"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
 stub_brew "$D/bin" yes
 stub_gh "$D/bin" yes no
 stub "$D/bin" claude <<'EOF'
@@ -206,7 +238,7 @@ assert_no_mutation "$CC_STUB_LOG"
 banner "(iii) brew installed but not on PATH"
 D="$WORK/iii"; mkdir -p "$D/bin" "$D/offpath"
 export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
-stub_clt "$D/bin"; stub_pbcopy "$D/bin"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
 stub_brew "$D/offpath" no        # the binary exists, but $D/offpath is not on PATH
 stub_gh "$D/bin" yes no
 base_env
@@ -236,7 +268,7 @@ You are the operator for this computer.
 ```
 EOF
 export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
-stub_clt "$D/bin"; stub_pbcopy "$D/bin"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
 stub_brew "$D/bin" yes
 stub_gh "$D/bin" yes yes
 stub "$D/bin" claude <<'EOF'
@@ -317,6 +349,179 @@ case "$EXTRACT" in
   *'```'*) bad "the extraction swallowed a fence" ;;
   *) ok "no fence in the extracted text" ;;
 esac
+
+# --------------------------------------------------------------------------
+# A stale developer path: `xcode-select -p` answers, but the directory it names holds no
+# real git. install.sh must decide the tools are missing from the filesystem alone and never
+# run the shim to find out.
+banner "(ix) a stale developer path never touches the shim"
+D="$WORK/ix"; mkdir -p "$D/bin" "$D/stale"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_pbcopy "$D/bin"
+stub "$D/bin" xcode-select <<EOF
+case "\$1" in -p) echo "$D/stale"; exit 0 ;; esac
+exit 0
+EOF
+stub "$D/bin" git <<'EOF'
+exit 0
+EOF
+stub "$D/bin" clang <<'EOF'
+exit 0
+EOF
+base_env
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/no-brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --dir "$D/claude-computer" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "the path is set but git or clang is broken"
+contains "$D/out" "git identity — checked once the Command Line Tools are in"
+assert_no_shim_invoked "$CC_STUB_LOG"
+assert_no_mutation "$CC_STUB_LOG"
+
+# --------------------------------------------------------------------------
+# The rest of the cases are NOT dry runs: they exercise the post-clone wait, which only
+# happens for real. Every command still goes to a stub, and `sleep` is a stub too, so the
+# 60-second poll costs nothing here.
+#
+# stub_race <bindir> <clonedir> <populate-at-nth-fetch | never>
+stub_race() {
+  local d="$1" clone="$2" at="$3"
+  stub "$d" sleep <<'EOF'
+exit 0
+EOF
+  stub "$d" gh <<EOF
+case "\$*" in
+  "auth status") exit 0 ;;
+  "api user --jq .login") echo octocat; exit 0 ;;
+  "repo view "*) [ "\${CC_TEST_REMOTE:-no}" = yes ] && exit 0 || exit 1 ;;
+  "repo clone "*)
+    # What a clone of a repo GitHub has not populated yet leaves behind: origin is set,
+    # there are no commits, and the work tree is empty.
+    mkdir -p "$clone/.git"
+    echo '[remote "origin"]' > "$clone/.git/config"
+    echo '	url = https://github.com/octocat/claude-computer.git' >> "$clone/.git/config"
+    exit 0 ;;
+esac
+exit 0
+EOF
+  stub "$d" git <<EOF
+populate() {
+  echo '# claude-computer' > "$clone/CLAUDE.md"
+  mkdir -p "$clone/docs"
+  printf '# p\\n\\n\`\`\`text\\nYou are the operator for this computer.\\n\`\`\`\\n' > "$clone/docs/FIRST-PROMPT.md"
+  : > "$clone/.template"
+}
+case "\$*" in
+  *--version*) echo "git version 2.48.0"; exit 0 ;;
+  *"config --global user.name"*)  echo "A Person"; exit 0 ;;
+  *"config --global user.email"*) echo "you@example.com"; exit 0 ;;
+  *fetch*)
+    n=\$(cat "$D/polls" 2>/dev/null || echo 0)
+    n=\$((n + 1)); echo "\$n" > "$D/polls"
+    if [ "$at" != never ] && [ "\$n" -ge "$at" ]; then populate; fi
+    exit 0 ;;
+esac
+exit 0
+EOF
+}
+
+banner "(x) the template copy lands on the third poll"
+D="$WORK/x"; mkdir -p "$D/bin" "$D/dev/usr/bin"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+stub_race "$D/bin" "$D/cc" 3
+base_env
+export CC_TEST_REMOTE=no
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+# shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
+printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
+PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "Waiting for GitHub to finish copying the template"
+contains "$D/out" "the copy arrived"
+contains "$D/out" "CLAUDE.md, docs/FIRST-PROMPT.md and .template are all there"
+if [ "$(cat "$D/polls")" = 3 ]; then ok "polled three times"; else bad "polled $(cat "$D/polls") times, wanted 3"; fi
+
+banner "(xi) the template copy never lands"
+D="$WORK/xi"; mkdir -p "$D/bin" "$D/dev/usr/bin"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+stub_race "$D/bin" "$D/cc" never
+base_env
+export CC_TEST_REMOTE=no
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+# shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
+printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
+PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
+check_exit 1 $?
+contains "$D/out" "has not finished copying the template"
+contains "$D/out" "re-running is safe"
+contains "$D/out" "already exists → clone"
+absent   "$D/out" "it is not a copy of"
+
+banner "(xii) resuming the empty clone that (xi) left behind"
+D="$WORK/xii"; mkdir -p "$D/bin" "$D/dev/usr/bin" "$D/cc/.git"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+# Exactly what a given-up run leaves: origin set to our repo, no CLAUDE.md.
+echo '[remote "origin"]' > "$D/cc/.git/config"
+printf '\turl = https://github.com/octocat/claude-computer.git\n' >> "$D/cc/.git/config"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+stub_race "$D/bin" "$D/cc" 1
+base_env
+export CC_TEST_REMOTE=yes
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+# shellcheck disable=SC2016  # a literal profile line, not an expression to expand here
+printf 'eval "%s"\n' '$(/opt/homebrew/bin/brew shellenv)' > "$D/zprofile"
+PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --yes --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "GitHub had not finished filling — resuming it"
+contains "$D/out" "Finishing the clone at"
+log_lacks "$CC_STUB_LOG" "gh repo create"
+log_lacks "$CC_STUB_LOG" "gh repo clone"
+unset CC_TEST_REMOTE
+
+# --------------------------------------------------------------------------
+# A bare `gh repo view <name>` inside another git repo can resolve against that repo's
+# remote instead of the account, so the slug must carry the owner once it is known.
+banner "(xiii) gh is owner-qualified once the account is known"
+D="$WORK/xiii"; mkdir -p "$D/bin" "$D/dev/usr/bin"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub_gh "$D/bin" yes no
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+base_env
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+PATH="$D/bin:/usr/bin:/bin" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+if grep -q "^gh repo view octocat/claude-computer\$" "$CC_STUB_LOG"; then
+  ok "asked gh for octocat/claude-computer, not a bare name"
+else
+  bad "gh repo view was not owner-qualified: $(grep '^gh repo view' "$CC_STUB_LOG" || echo none)"
+fi
 
 # --------------------------------------------------------------------------
 printf '\n%s\n' "$PASS passed, $FAIL failed"
