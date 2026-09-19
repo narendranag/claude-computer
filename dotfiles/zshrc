@@ -38,7 +38,7 @@ alias ls='eza --group-directories-first'
 alias ll='eza -l --git --group-directories-first'
 alias cat='bat --paging=never --style=plain'
 alias lg='lazygit'
-alias sm='cd "$CC_HOME"'
+alias cc='cd "$CC_HOME"'
 alias unlock='eval "$(secrets-unlock --export)"'
 
 export EDITOR="code --wait"
