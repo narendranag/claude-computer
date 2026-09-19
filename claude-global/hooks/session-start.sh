@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # SessionStart hook: sync the fleet brain, report the secrets state, refresh vault task copies.
 # Stdout becomes session context, so keep it to a few lines. Never fail the session.
-SM="${SM_HOME:-$HOME/system-manager}"
+SM="${CC_HOME:-$HOME/claude-computer}"
 # timeout is GNU coreutils; fall back to gtimeout, or run unguarded.
 to() { local s="$1"; shift; if command -v timeout >/dev/null; then timeout "$s" "$@"; elif command -v gtimeout >/dev/null; then gtimeout "$s" "$@"; else "$@"; fi; }
-[ -d "$SM/.git" ] || { echo "system-manager: no repo at $SM — run /setup"; exit 0; }
+[ -d "$SM/.git" ] || { echo "claude-computer: no repo at $SM — run /setup"; exit 0; }
 
 if out="$(to 20 git -C "$SM" pull --rebase --autostash -q 2>&1)"; then
-  echo "system-manager: pulled ($(git -C "$SM" log -1 --format='%h %s' | cut -c1-72))"
+  echo "claude-computer: pulled ($(git -C "$SM" log -1 --format='%h %s' | cut -c1-72))"
 else
-  echo "system-manager: pull FAILED — working from local copy. Resolve before editing docs/. ${out:0:200}"
+  echo "claude-computer: pull FAILED — working from local copy. Resolve before editing docs/. ${out:0:200}"
 fi
 
 case "$("$SM/bin/secrets-unlock" --status 2>/dev/null)" in

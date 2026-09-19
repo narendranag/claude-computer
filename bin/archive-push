@@ -16,14 +16,14 @@
 #   --index-only    just rebuild ~/archive/INDEX.md from `rclone lsjson`
 #
 # Remote: r2:<bucket>/archive/  (credentials from Bitwarden, see docs/SECRETS.md)
-# Env: SM_ARCHIVE (default ~/archive)
+# Env: CC_ARCHIVE (default ~/archive)
 # Exit codes: 0 ok · 1 upload or verify failed · 2 usage · 3 rclone/jq missing · 4 locked · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
-sm_need jq
+cc_wants_help "$@"
+cc_need jq
 
-ARCHIVE="${SM_ARCHIVE:-$HOME/archive}"
+ARCHIVE="${CC_ARCHIVE:-$HOME/archive}"
 paths=(); delete=0; dry=0; index_only=0; assume_yes=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,19 +31,19 @@ while [ $# -gt 0 ]; do
     --yes|-y) assume_yes=1; shift ;;
     --dry-run) dry=1; shift ;;
     --index-only) index_only=1; shift ;;
-    -*) sm_usage >&2; exit "$EX_USAGE" ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
     *) paths+=("$1"); shift ;;
   esac
 done
-[ "$index_only" -eq 1 ] || [ "${#paths[@]}" -gt 0 ] || { sm_usage >&2; exit "$EX_USAGE"; }
-[ -d "$ARCHIVE" ] || sm_die "$EX_CONFIG" "$ARCHIVE does not exist"
+[ "$index_only" -eq 1 ] || [ "${#paths[@]}" -gt 0 ] || { cc_usage >&2; exit "$EX_USAGE"; }
+[ -d "$ARCHIVE" ] || cc_die "$EX_CONFIG" "$ARCHIVE does not exist"
 
-sm_r2_env
-remote="r2:$SM_R2_BUCKET/archive"
+cc_r2_env
+remote="r2:$CC_R2_BUCKET/archive"
 
 rebuild_index() {
   local tmp; tmp="$(mktemp)"
-  rclone lsjson -R --files-only "$remote" > "$tmp" || { rm -f "$tmp"; sm_die "$EX_FAIL" "lsjson failed"; }
+  rclone lsjson -R --files-only "$remote" > "$tmp" || { rm -f "$tmp"; cc_die "$EX_FAIL" "lsjson failed"; }
   {
     echo "---"
     echo "type: index"
@@ -73,44 +73,44 @@ rebuild_index() {
     jq -r 'sort_by(.Path)[] | "- `\(.Path)` — \(.Size) B — \(.ModTime[0:10])"' "$tmp"
   } > "$ARCHIVE/INDEX.md"
   rm -f "$tmp"
-  sm_info "index: $ARCHIVE/INDEX.md ($(grep -c '^- `' "$ARCHIVE/INDEX.md") files)"
+  cc_info "index: $ARCHIVE/INDEX.md ($(grep -c '^- `' "$ARCHIVE/INDEX.md") files)"
 }
 
 if [ "$index_only" -eq 1 ]; then rebuild_index; exit "$EX_OK"; fi
 
 archive_real="$(cd "$ARCHIVE" && pwd -P)"
 for p in "${paths[@]}"; do
-  [ -e "$p" ] || sm_die "$EX_USAGE" "no such path: $p"
+  [ -e "$p" ] || cc_die "$EX_USAGE" "no such path: $p"
   abs="$(cd "$(dirname "$p")" && pwd -P)/$(basename "$p")"
-  case "$abs" in "$archive_real"/*) ;; *) sm_die "$EX_USAGE" "$p is not inside $ARCHIVE — move it there first" ;; esac
+  case "$abs" in "$archive_real"/*) ;; *) cc_die "$EX_USAGE" "$p is not inside $ARCHIVE — move it there first" ;; esac
   rel="${abs#"$archive_real"/}"
-  case "$rel" in CLAUDE.md|INDEX.md|TASKS.md) sm_die "$EX_USAGE" "refusing to archive the brain's own $rel" ;; esac
+  case "$rel" in CLAUDE.md|INDEX.md|TASKS.md) cc_die "$EX_USAGE" "refusing to archive the brain's own $rel" ;; esac
 
   if [ -d "$abs" ]; then src="$abs"; dst="$remote/$rel"; else src="$abs"; dst="$remote/$(dirname "$rel")"; fi
   [ "$dst" = "$remote/." ] && dst="$remote"
 
-  sm_info "[$(sm_host)] push $rel → $dst"
+  cc_info "[$(cc_host)] push $rel → $dst"
   if [ "$dry" -eq 1 ]; then
     rclone copy --dry-run "$src" "$dst"
     continue
   fi
-  rclone copy --checksum --progress "$src" "$dst" || sm_die "$EX_FAIL" "upload failed: $rel"
+  rclone copy --checksum --progress "$src" "$dst" || cc_die "$EX_FAIL" "upload failed: $rel"
   if [ -d "$abs" ]; then
-    rclone check --one-way "$abs" "$dst" || sm_die "$EX_FAIL" "verify failed: $rel (local copy kept)"
+    rclone check --one-way "$abs" "$dst" || cc_die "$EX_FAIL" "verify failed: $rel (local copy kept)"
   else
-    rclone check --one-way --include "/$(basename "$abs")" "$(dirname "$abs")" "$dst" || sm_die "$EX_FAIL" "verify failed: $rel (local copy kept)"
+    rclone check --one-way --include "/$(basename "$abs")" "$(dirname "$abs")" "$dst" || cc_die "$EX_FAIL" "verify failed: $rel (local copy kept)"
   fi
   if [ "$delete" -eq 1 ]; then
-    # After this there is one copy, in R2. sm_confirm answers no when there is no
+    # After this there is one copy, in R2. cc_confirm answers no when there is no
     # terminal, so an unattended run keeps the local copy unless --yes was passed.
-    if [ "$assume_yes" -eq 1 ] || sm_confirm "delete the local copy of $rel? R2 will hold the only copy."; then
+    if [ "$assume_yes" -eq 1 ] || cc_confirm "delete the local copy of $rel? R2 will hold the only copy."; then
       rm -rf -- "$abs"
-      sm_info "verified; removed local $rel"
+      cc_info "verified; removed local $rel"
     else
-      sm_info "verified; local copy kept (not confirmed)"
+      cc_info "verified; local copy kept (not confirmed)"
     fi
   else
-    sm_info "verified; local copy kept (pass --delete-local to remove)"
+    cc_info "verified; local copy kept (pass --delete-local to remove)"
   fi
 done
 

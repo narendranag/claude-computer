@@ -8,8 +8,8 @@
 
 ## Context
 
-- System and fleet: `~/system-manager/docs/` (start with `FLEET.md`).
-- How every project is built: `~/system-manager/docs/DEV-GUIDELINES.md`. Deviations are listed below with the reason.
+- System and fleet: `~/claude-computer/docs/` (start with `FLEET.md`).
+- How every project is built: `~/claude-computer/docs/DEV-GUIDELINES.md`. Deviations are listed below with the reason.
 - Tasks: `TASKS.md` in this folder. Decisions: `DECISIONS.md`.
 
 ## Stack
@@ -26,8 +26,8 @@ Deviations from DEV-GUIDELINES: _none_
 
 EAS Build + EAS Submit.
 
-Secrets come from Bitwarden (`system-manager/<name>-*` items) through `.envrc` + direnv, and into deploy targets with the platform's secret command. Never committed.
+Secrets come from Bitwarden (`claude-computer/<name>-*` items) through `.envrc` + direnv, and into deploy targets with the platform's secret command. Never committed.
 
 ## Analytics and errors
 
-PostHog (key: Bitwarden `system-manager/posthog-__NAME__`), unless this project is private/zero-cost, in which case Bugsink on the fleet.
+PostHog (key: Bitwarden `claude-computer/posthog-__NAME__`), unless this project is private/zero-cost, in which case Bugsink on the fleet.

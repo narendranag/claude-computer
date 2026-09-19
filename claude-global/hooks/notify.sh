@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Notification hook: Claude is waiting for you (permission prompt or idle input) → Telegram.
-SM="${SM_HOME:-$HOME/system-manager}"
+SM="${CC_HOME:-$HOME/claude-computer}"
 input="$(cat)"
 msg="$(printf '%s' "$input" | jq -r '.message // "waiting for input"' 2>/dev/null)"
 cwd="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)"

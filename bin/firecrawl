@@ -7,29 +7,29 @@
 #   --full   keep navigation, headers and footers (default: main content only)
 #   --json   raw API response
 #
-# Secret: Bitwarden item "system-manager/firecrawl", password field = API key.
+# Secret: Bitwarden item "claude-computer/firecrawl", password field = API key.
 # Env: FIRECRAWL_API (default https://api.firecrawl.dev/v2)
 # Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/bw missing · 4 locked · 5 item missing
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
-sm_need curl jq
+cc_wants_help "$@"
+cc_need curl jq
 
 url=""; json=0; main=true
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) json=1; shift ;;
     --full) main=false; shift ;;
-    -*) sm_usage >&2; exit "$EX_USAGE" ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
     *) url="$1"; shift ;;
   esac
 done
-[ -n "$url" ] || { sm_usage >&2; exit "$EX_USAGE"; }
+[ -n "$url" ] || { cc_usage >&2; exit "$EX_USAGE"; }
 
-key="$(sm_secret firecrawl)"
+key="$(cc_secret firecrawl)"
 body="$(jq -n --arg u "$url" --argjson m "$main" '{url:$u, formats:["markdown"], onlyMainContent:$m}')"
-resp="$(sm_curl "Authorization: Bearer $key" -H 'Content-Type: application/json' \
-  -d "$body" "${FIRECRAWL_API:-https://api.firecrawl.dev/v2}/scrape")" || sm_die "$EX_FAIL" "API error: $resp"
+resp="$(cc_curl "Authorization: Bearer $key" -H 'Content-Type: application/json' \
+  -d "$body" "${FIRECRAWL_API:-https://api.firecrawl.dev/v2}/scrape")" || cc_die "$EX_FAIL" "API error: $resp"
 
 if [ "$json" -eq 1 ]; then printf '%s\n' "$resp"; exit 0; fi
 printf '%s' "$resp" | jq -r '.data.markdown // empty'

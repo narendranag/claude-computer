@@ -6,7 +6,7 @@
 #   long-job 2>&1 | tail -20 | tg-send
 #   tg-send --dry-run "text"     print what would be sent; needs no secrets
 #
-# Secrets (Bitwarden item "system-manager/telegram"):
+# Secrets (Bitwarden item "claude-computer/telegram"):
 #   password field → bot token (from BotFather)
 #   custom field "chat_id" → your chat id (message the bot, then read getUpdates)
 #
@@ -14,7 +14,7 @@
 # Exit codes: 0 sent · 1 Telegram rejected it · 2 no text · 3 missing curl/bw/jq · 4 locked · 5 item missing
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
+cc_wants_help "$@"
 
 dry=0
 if [ "${1:-}" = "--dry-run" ]; then dry=1; shift; fi
@@ -24,11 +24,11 @@ if [ $# -gt 0 ]; then
 elif [ ! -t 0 ]; then
   text="$(cat)"
 else
-  sm_usage >&2; exit "$EX_USAGE"
+  cc_usage >&2; exit "$EX_USAGE"
 fi
-[ -n "${text//[[:space:]]/}" ] || sm_die "$EX_USAGE" "empty message"
+[ -n "${text//[[:space:]]/}" ] || cc_die "$EX_USAGE" "empty message"
 
-msg="[$(sm_host)] $text"
+msg="[$(cc_host)] $text"
 msg="${msg:0:4096}"
 
 if [ "$dry" -eq 1 ]; then
@@ -36,17 +36,17 @@ if [ "$dry" -eq 1 ]; then
   exit "$EX_OK"
 fi
 
-sm_need curl jq
-token="$(sm_secret telegram)"
-chat_id="$(sm_secret telegram chat_id)"
+cc_need curl jq
+token="$(cc_secret telegram)"
+chat_id="$(cc_secret telegram chat_id)"
 
 # URL passed on stdin, not argv, so the token never shows up in `ps`.
 resp="$(printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$token" |
   curl -sS --max-time 20 -K - \
     --data-urlencode "chat_id=$chat_id" \
     --data-urlencode "text=$msg" \
-    --data-urlencode "disable_web_page_preview=true")" || sm_die "$EX_FAIL" "network error"
+    --data-urlencode "disable_web_page_preview=true")" || cc_die "$EX_FAIL" "network error"
 
 if [ "$(printf '%s' "$resp" | jq -r '.ok')" != "true" ]; then
-  sm_die "$EX_FAIL" "telegram: $(printf '%s' "$resp" | jq -r '.description // "unknown error"')"
+  cc_die "$EX_FAIL" "telegram: $(printf '%s' "$resp" | jq -r '.description // "unknown error"')"
 fi

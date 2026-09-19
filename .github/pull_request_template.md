@@ -25,7 +25,7 @@ is not. Delete what doesn't apply.
 ## Checks
 
 - [ ] bash 3.2 compatible (no associative arrays, no `mapfile`, no `${x^^}`)
-- [ ] Uses the `sm_*` helpers and `EX_*` exit codes from `lib/common.sh`
+- [ ] Uses the `cc_*` helpers and `EX_*` exit codes from `lib/common.sh`
 - [ ] No secret reaches a command line, a file, a log or a message
 - [ ] No real hostnames, usernames, email addresses, IPs, Tailscale names or chat IDs anywhere in the diff
 - [ ] `--help` text updated if behaviour or flags changed

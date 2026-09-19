@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import google_auth  # noqa: E402
-import sm  # noqa: E402
+import cc  # noqa: E402
 
 
 def header(msg: dict, name: str) -> str:
@@ -63,10 +63,10 @@ def main() -> int:
     try:
         a = ap.parse_args()
     except SystemExit:
-        return sm.EX_USAGE
+        return cc.EX_USAGE
     if a.help or not a.cmd:
         print(__doc__)
-        return sm.EX_OK if a.help else sm.EX_USAGE
+        return cc.EX_OK if a.help else cc.EX_USAGE
 
     svc = google_auth.service("gmail", "v1").users()
     if a.cmd == "labels":
@@ -97,4 +97,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sm.run_main(main)
+    cc.run_main(main)

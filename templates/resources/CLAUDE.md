@@ -2,7 +2,7 @@
 
 One folder per person: passports, IDs, tax, insurance, wills, certificates. **Sensitive.** Never a git repo, never in the vault, never in plain object storage.
 
-System context: `~/system-manager/docs/`.
+System context: `~/claude-computer/docs/`.
 
 ## Layout
 

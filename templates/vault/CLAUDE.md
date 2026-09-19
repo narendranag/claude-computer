@@ -2,7 +2,7 @@
 
 An Obsidian vault that Claude manages. **Capture is free; filing, linking and retrieval are Claude's job.** Structure lives in properties (frontmatter), not folders.
 
-System context: `~/system-manager/docs/`. Tasks are **not** kept here — see Rules.
+System context: `~/claude-computer/docs/`. Tasks are **not** kept here — see Rules.
 
 ## Shape
 

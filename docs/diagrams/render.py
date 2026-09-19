@@ -216,7 +216,7 @@ class Row:
 
 
 MAP_ROWS = [
-    Row("system-manager/", "the fleet brain · one clone per manager", True, True, "git"),
+    Row("claude-computer/", "the fleet brain · one clone per manager", True, True, "git"),
     Row("projects/*", "active work · one repo each", True, True, "git"),
     Row("_scratch/", "disposable · swept monthly", False, False, "local", 1),
     Row("products/*", "graduated · in production", True, True, "git"),
@@ -305,7 +305,7 @@ def draw_map(t: dict) -> str:
     s.icon_github(bx + 20, gy + 18, t["git"])
     s.text(bx + 50, gy + 33, "GitHub", 16, 650)
     repos = [
-        ("system-manager", "private · the instance", "inst"),
+        ("claude-computer", "private · the instance", "inst"),
         ("projects, products,", "personal, vault · private", "proj"),
         ("this template", "public · new instances start here", "tmpl"),
     ]
@@ -391,7 +391,7 @@ def draw_map(t: dict) -> str:
     s.text(cx + 16, hy + 54, "no brain · managed by any", 11.5, 400, t["muted"])
     s.text(cx + 16, hy + 70, "manager over SSH", 11.5, 400, t["muted"])
     s.rect(cx + 16, hy + 88, cw - 32, 42, r=8, fill=t["sunk"], stroke=t["line"])
-    s.text(cx + 28, hy + 106, "/etc/system-manager/", 11, 600, t["ink"], mono=True)
+    s.text(cx + 28, hy + 106, "/etc/claude-computer/", 11, 600, t["ink"], mono=True)
     s.text(cx + 28, hy + 121, "machine.md  ← backstop", 11, 600, t["muted"], mono=True)
     s.path(f"M{cx + cw / 2},{fy + 50 + 84 + 68 + 2} L{cx + cw / 2},{hy - 3}", t["ink"], 1.5, end=True)
     s.text(cx + cw / 2 + 10, hy - 26, "SSH over Tailscale", 11.5, 600, t["ink"])
@@ -588,7 +588,7 @@ def draw_loop(t: dict) -> str:
     ry = 420
     card(s, 48, ry, W - 96, 108, fill=t["sunk"])
     s.icon_github(66, ry + 16, t["git"])
-    s.text(96, ry + 31, "system-manager", 15, 700, mono=True)
+    s.text(96, ry + 31, "claude-computer", 15, 700, mono=True)
     s.text(242, ry + 31, "private · cloned on every manager", 12.5, 400, t["muted"])
     files = [
         ("machines/laptop.md", "written only by laptop", t["claude"]),

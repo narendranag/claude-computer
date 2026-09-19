@@ -16,7 +16,7 @@
 # Exit codes: 0 ok · 1 a step failed · 2 usage / target exists · 3 missing tool
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
+cc_wants_help "$@"
 
 type=""; name=""; parent="$HOME/projects"; remote=1; dry=0
 while [ $# -gt 0 ]; do
@@ -24,38 +24,38 @@ while [ $# -gt 0 ]; do
     --dir) parent="${2:?}"; shift 2 ;;
     --no-remote) remote=0; shift ;;
     --dry-run) dry=1; shift ;;
-    -*) sm_usage >&2; exit "$EX_USAGE" ;;
-    *) if [ -z "$type" ]; then type="$1"; elif [ -z "$name" ]; then name="$1"; else sm_usage >&2; exit "$EX_USAGE"; fi; shift ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
+    *) if [ -z "$type" ]; then type="$1"; elif [ -z "$name" ]; then name="$1"; else cc_usage >&2; exit "$EX_USAGE"; fi; shift ;;
   esac
 done
-case "$type" in web|mobile|cli|desktop) ;; *) sm_usage >&2; exit "$EX_USAGE" ;; esac
-[[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || sm_die "$EX_USAGE" "name must be lowercase letters, digits, dashes"
+case "$type" in web|mobile|cli|desktop) ;; *) cc_usage >&2; exit "$EX_USAGE" ;; esac
+[[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || cc_die "$EX_USAGE" "name must be lowercase letters, digits, dashes"
 
 dir="$parent/$name"
-tpl="$SM_ROOT/templates/$type"
-[ -e "$dir" ] && sm_die "$EX_USAGE" "$dir already exists"
-[ -d "$tpl" ] || sm_die "$EX_CONFIG" "no template at $tpl"
+tpl="$CC_ROOT/templates/$type"
+[ -e "$dir" ] && cc_die "$EX_USAGE" "$dir already exists"
+[ -d "$tpl" ] || cc_die "$EX_CONFIG" "no template at $tpl"
 
-step() { sm_info "→ $*"; }
+step() { cc_info "→ $*"; }
 do_() { if [ "$dry" -eq 1 ]; then printf '  %s\n' "$*" >&2; else "$@"; fi; }
 
 step "scaffold $type app at $dir"
 [ "$dry" -eq 1 ] || mkdir -p "$parent"
 case "$type" in
-  web)     sm_need pnpm; do_ pnpm create next-app@latest "$dir" --ts --tailwind --eslint --app --src-dir --use-pnpm --import-alias "@/*" --yes
+  web)     cc_need pnpm; do_ pnpm create next-app@latest "$dir" --ts --tailwind --eslint --app --src-dir --use-pnpm --import-alias "@/*" --yes
            # End-to-end tests: Playwright with its bundled Chromium (config and smoke test come from the overlay).
            if [ "$dry" -eq 1 ]; then do_ pnpm add -D @playwright/test vitest; do_ pnpm exec playwright install chromium
            else (cd "$dir" && pnpm add -D @playwright/test vitest && pnpm exec playwright install chromium); fi ;;
-  mobile)  sm_need pnpm; do_ pnpm create expo-app@latest "$dir" --template default ;;
-  cli)     sm_need uv;   do_ uv init --package --name "$name" "$dir"
+  mobile)  cc_need pnpm; do_ pnpm create expo-app@latest "$dir" --template default ;;
+  cli)     cc_need uv;   do_ uv init --package --name "$name" "$dir"
                          [ "$dry" -eq 1 ] || (cd "$dir" && uv add typer rich && uv add --dev pytest ruff pyright) ;;
-  desktop) sm_need pnpm
+  desktop) cc_need pnpm
            # create-tauri-app scaffolds into ./<name>, so it has to run in $parent — not in
            # whatever directory the caller happened to be in.
            if [ "$dry" -eq 1 ]; then do_ pnpm create tauri-app@latest "$name" --manager pnpm --template react-ts --yes
            else
              (cd "$parent" && pnpm create tauri-app@latest "$name" --manager pnpm --template react-ts --yes)
-             [ -d "$dir" ] || sm_die "$EX_FAIL" "tauri scaffold did not create $dir"
+             [ -d "$dir" ] || cc_die "$EX_FAIL" "tauri scaffold did not create $dir"
            fi ;;
 esac
 
@@ -73,27 +73,27 @@ if [ "$dry" -eq 0 ]; then
       cp "$src" "$dst" || fail=1
     fi
   done < <(cd "$tpl" && find . -type f ! -name '.DS_Store')
-  [ "$fail" -eq 0 ] || sm_die "$EX_FAIL" "could not overlay templates/$type onto $dir"
+  [ "$fail" -eq 0 ] || cc_die "$EX_FAIL" "could not overlay templates/$type onto $dir"
 
   # __NAME__, not {{name}}: `{{…}}` is just's own interpolation syntax, so a justfile
   # carrying the scaffold placeholder is unparseable until it is substituted.
   while read -r f; do
     sed -i '' "s/__NAME__/$name/g" "$f" 2>/dev/null || sed -i "s/__NAME__/$name/g" "$f" || fail=1
   done < <(grep -rlI '__NAME__' "$dir" --exclude-dir=node_modules --exclude-dir=.venv 2>/dev/null)
-  [ "$fail" -eq 0 ] || sm_die "$EX_FAIL" "could not substitute the project name in $dir"
+  [ "$fail" -eq 0 ] || cc_die "$EX_FAIL" "could not substitute the project name in $dir"
 fi
 
 step "git init + secret-scan hook + first commit"
 if [ "$dry" -eq 0 ]; then
   cd "$dir"
   [ -d .git ] || git init -q -b main
-  cp "$SM_ROOT/.githooks/pre-commit" .git/hooks/pre-commit
+  cp "$CC_ROOT/.githooks/pre-commit" .git/hooks/pre-commit
   git add -A
-  git commit -q -m "chore: scaffold $type app from system-manager template" || exit "$EX_FAIL"
+  git commit -q -m "chore: scaffold $type app from claude-computer template" || exit "$EX_FAIL"
 fi
 
 if [ "$remote" -eq 1 ]; then
-  sm_need gh
+  cc_need gh
   step "gh repo create $name --private"
   if [ "$dry" -eq 0 ]; then
     gh repo create "$name" --private --source "$dir" --remote origin --push || exit "$EX_FAIL"

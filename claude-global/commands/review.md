@@ -7,8 +7,8 @@ A weekly review. Produce `~/vault/maps/review-<YYYY>-W<ww>.md` and a short summa
 Gather (run in parallel where you can):
 
 0. **Unassigned — this step is not optional.** Every item under `## Unassigned` in `~/vault/TASKS.md` leaves the review with an owner: move it to that brain's `TASKS.md` (keep its backlink) or to `## Later` in the vault. Propose an owner for each in one table; apply after I confirm. The review is not done while `## Unassigned` has items.
-1. **Tasks** — `~/system-manager/bin/tasks-sync --json`: overdue, `## Now` items older than two weeks (from git blame on each `TASKS.md`), brains with nothing in `## Now`.
-2. **Activity** — for each repo under `~/system-manager`, `~/projects/*`, `~/products/*`, `~/vault`: commits in the last 7 days (`git log --since=7.days --oneline`); unpushed commits; uncommitted changes; repos with no commits in 30 days (stale — ask whether to archive or graduate).
+1. **Tasks** — `~/claude-computer/bin/tasks-sync --json`: overdue, `## Now` items older than two weeks (from git blame on each `TASKS.md`), brains with nothing in `## Now`.
+2. **Activity** — for each repo under `~/claude-computer`, `~/projects/*`, `~/products/*`, `~/vault`: commits in the last 7 days (`git log --since=7.days --oneline`); unpushed commits; uncommitted changes; repos with no commits in 30 days (stale — ask whether to archive or graduate).
 3. **Fleet** — `map-check` on this machine; `docs/FLEET.md` rows whose machine file hasn't changed in 30 days; `DECISIONS.md` entries this week.
 4. **Vault** — notes left in `inbox/`; transcripts still `status: unprocessed`; `sources/feeds/` digests with nothing saved.
 5. **Housekeeping** — `~/projects/_scratch` items older than 30 days (propose sweeping to `~/archive`); `~/resources/*/INDEX.md` expiry dates in the next 90 days (route "renew" tasks to `~/resources/TASKS.md`).

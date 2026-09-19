@@ -1,6 +1,6 @@
-# system-manager — the fleet brain
+# claude-computer — the fleet brain
 
-You are the operator for this user's machines. This repo is the shared brain for every machine they manage. It is cloned at `~/system-manager` on every active (manager) machine.
+You are the operator for this user's machines. This repo is the shared brain for every machine they manage. It is cloned at `~/claude-computer` on every active (manager) machine.
 
 ## Every session, in this order
 
@@ -13,7 +13,7 @@ You are the operator for this user's machines. This repo is the shared brain for
 ## Ownership
 
 - A machine writes only its own `docs/machines/<host>.md`, plus the file of any headless box it changed.
-- After changing a headless box, also copy its file onto the box at `/etc/system-manager/machine.md`.
+- After changing a headless box, also copy its file onto the box at `/etc/claude-computer/machine.md`.
 - `docs/DECISIONS.md` is append-only. Every entry: `- [<host>] [YYYY-MM-DD] <decision> — <why>`.
 - Fleet-wide files (`bin/`, `claude-global/`, `Brewfile*`, `docs/DEV-GUIDELINES.md`) change rarely and deliberately. Say so in the commit.
 
@@ -35,8 +35,8 @@ You are the operator for this user's machines. This repo is the shared brain for
 | Path                                          | What                                                                                |
 | --------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `bin/`                                        | every script; run any with `--help`                                                 |
-| `lib/common.sh`                               | the `sm_*` helpers and `EX_*` exit codes every bash script sources                  |
-| `lib/sm.py`, `lib/google_auth.py`             | the same for the `uv run --script` scripts; Google OAuth                            |
+| `lib/common.sh`                               | the `cc_*` helpers and `EX_*` exit codes every bash script sources                  |
+| `lib/cc.py`, `lib/google_auth.py`             | the same for the `uv run --script` scripts; Google OAuth                            |
 | `claude-global/`                              | symlinked to `~/.claude` — global CLAUDE.md, settings, hooks, slash commands        |
 | `Brewfile`, `Brewfile.dev`, `Brewfile.server` | packages, layered by role                                                           |
 | `setup-tools.sh`                              | what Homebrew cannot install — oh-my-zsh, runtimes, Playwright, VS Code extensions  |

@@ -20,7 +20,7 @@ Reads MacParakeet's database read-only and writes, for each completed transcript
   ---
 
 Idempotent, two ways:
-  1. A cursor per machine (the database is per machine) at ~/.local/state/system-manager/transcripts-sync.json:
+  1. A cursor per machine (the database is per machine) at ~/.local/state/claude-computer/transcripts-sync.json:
      the (updatedAt, id) of the last row written. Only rows strictly after it are read.
   2. Every note carries `macparakeet_id`. Before writing, the vault is checked for that id
      (inbox/transcripts/ and sources/transcripts/), so a lost or reset cursor never duplicates a note.
@@ -57,7 +57,7 @@ import unicodedata
 from pathlib import Path
 
 DEFAULT_DB = Path.home() / "Library/Application Support/MacParakeet/macparakeet.db"
-STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "system-manager/transcripts-sync.json"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "claude-computer/transcripts-sync.json"
 ID_RE = re.compile(r"^macparakeet_id:\s*(\S+)\s*$", re.M)
 STATUS_RE = re.compile(r"^status:\s*(\S+)\s*$", re.M)
 

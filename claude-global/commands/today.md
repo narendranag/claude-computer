@@ -4,7 +4,7 @@ description: Open or draft today's daily note from tasks across every brain
 
 Work in `~/vault`, following its `CLAUDE.md`.
 
-1. `~/system-manager/bin/tasks-sync --json` for the task picture, then `tasks-sync` to refresh the vault copies.
+1. `~/claude-computer/bin/tasks-sync --json` for the task picture, then `tasks-sync` to refresh the vault copies.
 2. Open `daily/<YYYY-MM-DD>.md`. If the scheduled job already drafted it, review it; otherwise create it from `_templates/daily.md`:
    - **Now** — open `## Now` tasks across all brains, grouped by brain, overdue first (⚠️).
    - **Due this week** — anything with `📅` in the next 7 days.

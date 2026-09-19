@@ -28,7 +28,7 @@ Usage:
 Overflow: ## Unassigned items render at the top of maps/tasks.md. /review must give each one an owner or
 move it to ## Later. When there are more than 10, tasks-sync sends one tg-send alert per day.
 
-Brains searched: system-manager, archive, vault, resources, library/camera,
+Brains searched: claude-computer, archive, vault, resources, library/camera,
 and every child of projects/, products/, personal/ that has a CLAUDE.md.
 
 Exit codes: 0 ok · 2 usage · 5 vault missing
@@ -49,7 +49,7 @@ from pathlib import Path
 SECTIONS = ("Now", "Next", "Later", "Done", "Unassigned")
 OPEN_SECTIONS = ("Now", "Next", "Later")
 UNASSIGNED_ALERT = 10
-STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "system-manager/tasks-sync.json"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "claude-computer/tasks-sync.json"
 START = "<!-- tasks-sync:start — generated, edit the brain's TASKS.md instead -->"
 END = "<!-- tasks-sync:end -->"
 BLOCK_RE = re.compile(r"<!-- tasks-sync:start.*?-->.*?<!-- tasks-sync:end -->", re.S)
@@ -57,7 +57,7 @@ TASK_RE = re.compile(r"^\s*- \[( |x|X)\]\s+(.*)$")
 DUE_RE = re.compile(r"📅\s*(\d{4}-\d{2}-\d{2})")
 DONE_RE = re.compile(r"✅\s*(\d{4}-\d{2}-\d{2})")
 TAG_RE = re.compile(r"(?<!\S)#([\w/-]+)")
-FIXED_BRAINS = ("system-manager", "archive", "vault", "resources", "library/camera")
+FIXED_BRAINS = ("claude-computer", "archive", "vault", "resources", "library/camera")
 CONTAINERS = ("projects", "products", "personal")
 RECENT_DONE_DAYS = 7
 

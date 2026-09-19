@@ -1,4 +1,4 @@
-# Tasks — system-manager
+# Tasks — claude-computer
 
 <!-- Format (shared by every brain):
      one `- [ ]` per task; optional `📅 YYYY-MM-DD` due date and `#tags`.

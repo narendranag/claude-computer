@@ -7,13 +7,13 @@ Set up this machine as part of the fleet. Follow `CLAUDE.md` in this repo throug
 
 Before each numbered phase, tell me in three lines what you are about to do and what you need from me.
 
-**Paths.** The repo must live at `~/system-manager`; hooks, permissions and `PATH` all assume it. `bin/` is not on this shell's `PATH` until phase 6 and a new shell, so until then always call scripts as `./bin/<name>` from the repo root.
+**Paths.** The repo must live at `~/claude-computer`; hooks, permissions and `PATH` all assume it. `bin/` is not on this shell's `PATH` until phase 6 and a new shell, so until then always call scripts as `./bin/<name>` from the repo root.
 
 **Resuming.** Phase 4 ends with a restart of Claude Code. Before it, write `- [ ] Resume /setup at phase 5 (<host>)` under `## Now` in `TASKS.md`. When `/setup` starts, check `TASKS.md` for a resume line and continue from that phase, then tick it.
 
 ## 0. Where are we
 
-- `pwd` must be `~/system-manager`. If it isn't, stop and tell me to move the clone there (`mv <path> ~/system-manager`) and restart Claude in it.
+- `pwd` must be `~/claude-computer`. If it isn't, stop and tell me to move the clone there (`mv <path> ~/claude-computer`) and restart Claude in it.
 - `git remote -v`, `ls docs/machines/`, `gh auth status`.
 - Ask me for my name and git email. Copy `dotfiles/gitconfig` to `~/.gitconfig` (back up an existing one to `~/.gitconfig.backup-<date>` and carry over anything personal from it), filling `{{git_name}}` and `{{git_email}}`. Git needs an identity before the first commit below.
 - Install the secret scanner before any commit: `brew install gitleaks`, then `git config core.hooksPath .githooks`.
@@ -30,7 +30,7 @@ Before each numbered phase, tell me in three lines what you are about to do and 
 - `ssh-keygen -t ed25519 -C "<host>" -f ~/.ssh/id_ed25519 -N ""` only if no key exists. One key per machine, never copied. Ask me whether I want a passphrase (then I run the command myself).
 - `gh ssh-key add` needs the `admin:public_key` scope. If `gh auth status` doesn't list it, I run `gh auth refresh -h github.com -s admin:public_key` (a browser step). Then `gh ssh-key add ~/.ssh/id_ed25519.pub --title "<host>"`.
 - Trust GitHub's host keys from GitHub's API, not from a first-connection prompt nobody can answer: `gh api meta --jq '.ssh_keys[]' | sed 's/^/github.com /' >> ~/.ssh/known_hosts`.
-- Switch `origin` to SSH (`git remote set-url origin git@github.com:<user>/system-manager.git`), `git push`, and confirm it worked.
+- Switch `origin` to SSH (`git remote set-url origin git@github.com:<user>/claude-computer.git`), `git push`, and confirm it worked.
 
 ## 3. Tailscale
 
@@ -45,15 +45,15 @@ This comes before Bitwarden so the deny rules (no raw `bw get` / `bw list`) are 
 Link the **contents** of `claude-global/`, not the directory — `~/.claude` also holds session transcripts and state that must never enter a repo:
 
 ```
-~/.claude/CLAUDE.md      → ~/system-manager/claude-global/CLAUDE.md
-~/.claude/settings.json  → ~/system-manager/claude-global/settings.json
-~/.claude/commands       → ~/system-manager/claude-global/commands
-~/.claude/hooks          → ~/system-manager/claude-global/hooks
+~/.claude/CLAUDE.md      → ~/claude-computer/claude-global/CLAUDE.md
+~/.claude/settings.json  → ~/claude-computer/claude-global/settings.json
+~/.claude/commands       → ~/claude-computer/claude-global/commands
+~/.claude/hooks          → ~/claude-computer/claude-global/hooks
 ```
 
 If any of these already exist, **don't just move them aside**: show me a diff of each against the repo version, propose a merge (my existing permissions, hooks and commands into `claude-global/` — this repo is private, so they belong there), apply what I approve, and only then back the originals up to `~/.claude/backup-<date>/` and link.
 
-Write the resume line in `TASKS.md` (see top), commit, and tell me to restart Claude Code in `~/system-manager`. After the restart, confirm the status line shows auto mode. If auto mode isn't available on this account or model, the session starts in Manual; tell me, and carry on — the ask and deny rules work the same.
+Write the resume line in `TASKS.md` (see top), commit, and tell me to restart Claude Code in `~/claude-computer`. After the restart, confirm the status line shows auto mode. If auto mode isn't available on this account or model, the session starts in Manual; tell me, and carry on — the ask and deny rules work the same.
 
 ## 5. Bitwarden
 

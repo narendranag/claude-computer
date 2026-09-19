@@ -2,7 +2,7 @@
 
 `~/archive` is a **staging area, not storage.** Things come here to be pushed to R2; once pushed and verified, R2 holds the only copy. This folder keeps just this file, `TASKS.md`, and `INDEX.md` — which is regenerated from R2 and never edited.
 
-System context: `~/system-manager/docs/`.
+System context: `~/claude-computer/docs/`.
 
 ## Jobs
 

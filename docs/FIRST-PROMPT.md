@@ -1,6 +1,6 @@
 # The first prompt
 
-Paste this into Claude Code, started inside `~/system-manager`, in auto mode (the status line reads ⏵⏵ auto mode on). It is the handover: after this, you authenticate, grant permissions and decide. Claude does the rest.
+Paste this into Claude Code, started inside `~/claude-computer`, in auto mode (the status line reads ⏵⏵ auto mode on). It is the handover: after this, you authenticate, grant permissions and decide. Claude does the rest.
 
 ---
 

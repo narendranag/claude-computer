@@ -28,7 +28,7 @@ body:
       label: How to reproduce
       description: The exact command, and what you expected.
       placeholder: |
-        1. SM_CAMERA_EXTS="NEF" camera-ingest /Volumes/Untitled test-shoot --dry-run
+        1. CC_CAMERA_EXTS="NEF" camera-ingest /Volumes/Untitled test-shoot --dry-run
         2. Expected …
         3. Got …
     validations:

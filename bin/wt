@@ -12,11 +12,11 @@
 # Exit codes: 0 ok · 1 git failed · 2 usage / not in a repo · 3 git or claude missing
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
-sm_need git
+cc_wants_help "$@"
+cc_need git
 
-[ $# -ge 1 ] || { sm_usage >&2; exit "$EX_USAGE"; }
-top="$(git rev-parse --show-toplevel 2>/dev/null)" || sm_die "$EX_USAGE" "not inside a git repo"
+[ $# -ge 1 ] || { cc_usage >&2; exit "$EX_USAGE"; }
+top="$(git rev-parse --show-toplevel 2>/dev/null)" || cc_die "$EX_USAGE" "not inside a git repo"
 # Always anchor on the main worktree, even when called from inside another worktree.
 main="$(git -C "$top" worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')"
 base="$(dirname "$main")/$(basename "$main").wt"
@@ -24,17 +24,17 @@ base="$(dirname "$main")/$(basename "$main").wt"
 case "$1" in
   --list) git -C "$main" worktree list; exit "$EX_OK" ;;
   --remove)
-    [ -n "${2:-}" ] || sm_die "$EX_USAGE" "--remove needs a branch"
+    [ -n "${2:-}" ] || cc_die "$EX_USAGE" "--remove needs a branch"
     git -C "$main" worktree remove "$base/$2" || exit "$EX_FAIL"
     exit "$EX_OK" ;;
-  -*) sm_usage >&2; exit "$EX_USAGE" ;;
+  -*) cc_usage >&2; exit "$EX_USAGE" ;;
 esac
 
 branch="$1"
 dir="$base/$branch"
 
 if [ -d "$dir" ]; then
-  sm_info "worktree exists: $dir"
+  cc_info "worktree exists: $dir"
 elif git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
   git -C "$main" worktree add "$dir" "$branch" || exit "$EX_FAIL"
 else
@@ -46,6 +46,6 @@ if [ "${2:-}" = "--no-claude" ]; then
   exit "$EX_OK"
 fi
 
-sm_need claude
+cc_need claude
 cd "$dir"
 exec claude

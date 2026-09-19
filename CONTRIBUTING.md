@@ -27,9 +27,9 @@ CI (`.github/workflows/ci.yml`) does exactly this on every push. Some `bin/` scr
 
 **bash 3.2.** macOS ships bash 3.2 and a new machine has nothing newer when setup starts. No associative arrays, no `mapfile`, no `${x^^}`. Process substitution and `[[ ]]` are fine. Anything that wants more should be Python with a `uv run --script` header.
 
-**`lib/common.sh`.** Source it; use `sm_die`, `sm_need`, `sm_info`, `sm_confirm`, `sm_secret`, `sm_curl` and the `EX_*` exit codes rather than rolling your own. Consistent exit codes are what lets slash commands and hooks react to failures.
+**`lib/common.sh`.** Source it; use `cc_die`, `cc_need`, `cc_info`, `cc_confirm`, `cc_secret`, `cc_curl` and the `EX_*` exit codes rather than rolling your own. Consistent exit codes are what lets slash commands and hooks react to failures.
 
-**No secret on a command line, ever.** Not in `curl`, not in `security`, not in a URL. `ps` is readable by every process on the machine. `sm_curl` and `sm_session_store` show the pattern.
+**No secret on a command line, ever.** Not in `curl`, not in `security`, not in a URL. `ps` is readable by every process on the machine. `cc_curl` and `cc_session_store` show the pattern.
 
 **No personal data.** No real hostnames, usernames, email addresses, IP addresses, Tailscale names or chat IDs — in code, in docs, in examples, in test fixtures. Use `example-laptop`, `<person>`, `you@example.com`. `gitleaks` catches keys; it does not catch your home address.
 
@@ -50,7 +50,7 @@ Instances of this template are private and full of one person's machines, so not
 
 ## What's wanted
 
-- **Other cameras.** `bin/camera-ingest` now reads `SM_CAMERA_EXTS`, but the date and frame-number parsing has only met a handful of bodies. Sidecars, dual-card setups and cameras that name files differently are all open.
+- **Other cameras.** `bin/camera-ingest` now reads `CC_CAMERA_EXTS`, but the date and frame-number parsing has only met a handful of bodies. Sidecars, dual-card setups and cameras that name files differently are all open.
 - **Linux.** `lib/common.sh` already branches for it and `bin/schedule` refuses outright. Systemd user timers in place of launchd, and an honest account of what does not translate, would make headless boxes first-class.
 - **Other tools' equivalents.** Not everyone uses Bitwarden, Tailscale, R2, Obsidian or Ghostty. A clean second implementation behind the same script interface — 1Password instead of `bw`, S3 instead of R2 — is more useful than an argument about which is better.
 - **Slash commands and scheduled jobs** you found you needed and the template does not have.

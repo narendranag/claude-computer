@@ -2,7 +2,7 @@
 
 `~/library/camera` holds RAW files and videos, one folder per shoot per day. Not a git repo (files are 30–60 MB each). The cold copy lives in R2.
 
-System context: `~/system-manager/docs/`.
+System context: `~/claude-computer/docs/`.
 
 ## Layout
 

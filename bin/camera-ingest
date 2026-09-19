@@ -10,24 +10,24 @@
 #   --no-push      skip the R2 cold copy
 #   --eject        eject the card after a fully verified ingest
 #
-# Which files: SM_CAMERA_EXTS, space-separated and case-insensitive. The default covers the
+# Which files: CC_CAMERA_EXTS, space-separated and case-insensitive. The default covers the
 # common RAW and video formats — RAF CR2 CR3 NEF ARW DNG ORF RW2 MOV MP4 — so a card from a
 # borrowed body ingests without editing anything. One body's worth:
-#   SM_CAMERA_EXTS="NEF MOV" camera-ingest /Volumes/Untitled harbour-walk
+#   CC_CAMERA_EXTS="NEF MOV" camera-ingest /Volumes/Untitled harbour-walk
 #
 # Layout:  ~/library/camera/YYYY/YYYY-MM-DD_<shoot>/YYYYMMDD_HHMMSS_<seq>.<ext>
 #          one folder per capture date; <seq> is the camera's own frame number.
 # Each folder gets SHA256SUMS. ~/library/camera/index.csv gains one exiftool row per file.
 # Never deletes anything from the card. Re-running is safe: identical files are skipped.
 #
-# Env: SM_CAMERA (default ~/library/camera) · SM_CAMERA_EXTS (default as above)
+# Env: CC_CAMERA (default ~/library/camera) · CC_CAMERA_EXTS (default as above)
 # Exit codes: 0 ok · 1 copy/verify/push failed · 2 usage · 3 exiftool/rclone missing · 4 locked · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
-sm_need exiftool shasum
+cc_wants_help "$@"
+cc_need exiftool shasum
 
-LIB="${SM_CAMERA:-$HOME/library/camera}"
+LIB="${CC_CAMERA:-$HOME/library/camera}"
 card=""; shoot=""; jpg=0; push=1; eject=0; dry=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -35,20 +35,20 @@ while [ $# -gt 0 ]; do
     --no-push) push=0; shift ;;
     --eject) eject=1; shift ;;
     --dry-run) dry=1; shift ;;
-    -*) sm_usage >&2; exit "$EX_USAGE" ;;
-    *) if [ -z "$card" ]; then card="$1"; elif [ -z "$shoot" ]; then shoot="$1"; else sm_usage >&2; exit "$EX_USAGE"; fi; shift ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
+    *) if [ -z "$card" ]; then card="$1"; elif [ -z "$shoot" ]; then shoot="$1"; else cc_usage >&2; exit "$EX_USAGE"; fi; shift ;;
   esac
 done
-[ -d "$card" ] && [ -n "$shoot" ] || { sm_usage >&2; exit "$EX_USAGE"; }
-[[ "$shoot" =~ ^[a-z0-9][a-z0-9-]*$ ]] || sm_die "$EX_USAGE" "shoot name: lowercase letters, digits, dashes"
+[ -d "$card" ] && [ -n "$shoot" ] || { cc_usage >&2; exit "$EX_USAGE"; }
+[[ "$shoot" =~ ^[a-z0-9][a-z0-9-]*$ ]] || cc_die "$EX_USAGE" "shoot name: lowercase letters, digits, dashes"
 
 # One `-ext` per extension. The default is deliberately broad — a card from a borrowed
 # body should ingest without editing the script.
-SM_CAMERA_EXTS="${SM_CAMERA_EXTS:-RAF CR2 CR3 NEF ARW DNG ORF RW2 MOV MP4}"
+CC_CAMERA_EXTS="${CC_CAMERA_EXTS:-RAF CR2 CR3 NEF ARW DNG ORF RW2 MOV MP4}"
 exts=""
-for e in $SM_CAMERA_EXTS; do exts="$exts -ext $e"; done
+for e in $CC_CAMERA_EXTS; do exts="$exts -ext $e"; done
 [ "$jpg" -eq 1 ] && exts="$exts -ext JPG"
-[ -n "$exts" ] || sm_die "$EX_USAGE" "SM_CAMERA_EXTS is empty"
+[ -n "$exts" ] || cc_die "$EX_USAGE" "CC_CAMERA_EXTS is empty"
 # The index always covers JPGs, whether or not this run ingested them.
 index_exts="$exts"
 case " $index_exts " in *" -ext JPG "*) ;; *) index_exts="$index_exts -ext JPG" ;; esac
@@ -56,7 +56,7 @@ case " $index_exts " in *" -ext JPG "*) ;; *) index_exts="$index_exts -ext JPG" 
 # One exiftool pass: source path, capture time, frame number from the filename.
 # shellcheck disable=SC2086,SC2016
 list="$(exiftool -r -q -m $exts -d '%Y%m%d_%H%M%S' -p '$Directory/$FileName	$DateTimeOriginal	$FileModifyDate' "$card" 2>/dev/null || true)"
-[ -n "$list" ] || sm_die "$EX_FAIL" "no files with extension $SM_CAMERA_EXTS found under $card (override with SM_CAMERA_EXTS)"
+[ -n "$list" ] || cc_die "$EX_FAIL" "no files with extension $CC_CAMERA_EXTS found under $card (override with CC_CAMERA_EXTS)"
 
 copied=0; skipped=0; failed=0; folders=""
 while IFS=$'\t' read -r src taken modified; do
@@ -76,19 +76,19 @@ while IFS=$'\t' read -r src taken modified; do
   src_sum="$(shasum -a 256 "$src" | awk '{print $1}')"
   if [ -f "$dst" ]; then
     if [ "$(shasum -a 256 "$dst" | awk '{print $1}')" = "$src_sum" ]; then skipped=$((skipped + 1)); continue; fi
-    sm_err "name collision with different content, not overwriting: $dst"; failed=$((failed + 1)); continue
+    cc_err "name collision with different content, not overwriting: $dst"; failed=$((failed + 1)); continue
   fi
   cp -p "$src" "$dst"
   if [ "$(shasum -a 256 "$dst" | awk '{print $1}')" = "$src_sum" ]; then
     printf '%s  %s\n' "$src_sum" "$(basename "$dst")" >> "$folder/SHA256SUMS"
     copied=$((copied + 1))
   else
-    sm_err "checksum mismatch, removed bad copy: $dst"; rm -f "$dst"; failed=$((failed + 1))
+    cc_err "checksum mismatch, removed bad copy: $dst"; rm -f "$dst"; failed=$((failed + 1))
   fi
 done <<< "$list"
 
 if [ "$dry" -eq 1 ]; then exit "$EX_OK"; fi
-sm_info "[$(sm_host)] camera-ingest $shoot: $copied copied, $skipped already present, $failed failed"
+cc_info "[$(cc_host)] camera-ingest $shoot: $copied copied, $skipped already present, $failed failed"
 
 # Index: rebuild rows for the touched folders.
 index="$LIB/index.csv"
@@ -103,12 +103,12 @@ for f in $folders; do
 done
 
 if [ "$push" -eq 1 ] && [ "$failed" -eq 0 ]; then
-  sm_r2_env
+  cc_r2_env
   for f in $folders; do
     rel="${f#"$LIB"/}"
-    rclone copy --checksum "$f" "r2:$SM_R2_BUCKET/library/camera/$rel" || { sm_err "push failed: $rel"; failed=$((failed + 1)); }
+    rclone copy --checksum "$f" "r2:$CC_R2_BUCKET/library/camera/$rel" || { cc_err "push failed: $rel"; failed=$((failed + 1)); }
   done
 fi
 
 [ "$failed" -eq 0 ] || exit "$EX_FAIL"
-if [ "$eject" -eq 1 ] && sm_is_macos; then diskutil eject "$card" >/dev/null && sm_info "ejected $card"; fi
+if [ "$eject" -eq 1 ] && cc_is_macos; then diskutil eject "$card" >/dev/null && cc_info "ejected $card"; fi

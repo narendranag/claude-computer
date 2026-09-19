@@ -8,34 +8,34 @@
 #
 # Remote: rescrypt: = rclone crypt over r2:<bucket>/resources (file and folder names encrypted).
 # Keys from Bitwarden; no rclone.conf on disk. See docs/SECRETS.md.
-# Env: SM_RESOURCES (default ~/resources)
+# Env: CC_RESOURCES (default ~/resources)
 # Exit codes: 0 ok · 1 sync failed (often: needs --resync) · 2 usage · 3 rclone missing · 4 locked · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
+cc_wants_help "$@"
 
-RES="${SM_RESOURCES:-$HOME/resources}"
+RES="${CC_RESOURCES:-$HOME/resources}"
 dry=0; resync=0; yes=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) dry=1; shift ;;
     --resync) resync=1; shift ;;
     --yes) yes=1; shift ;;
-    *) sm_usage >&2; exit "$EX_USAGE" ;;
+    *) cc_usage >&2; exit "$EX_USAGE" ;;
   esac
 done
-[ -d "$RES" ] || sm_die "$EX_CONFIG" "$RES does not exist"
+[ -d "$RES" ] || cc_die "$EX_CONFIG" "$RES does not exist"
 if [ "$resync" -eq 1 ] && [ "$yes" -eq 0 ] && [ "$dry" -eq 0 ]; then
-  sm_die "$EX_USAGE" "--resync rebuilds the baseline and can bring back deleted files. Re-run with --yes, or --dry-run first."
+  cc_die "$EX_USAGE" "--resync rebuilds the baseline and can bring back deleted files. Re-run with --yes, or --dry-run first."
 fi
 
-sm_crypt_env
+cc_crypt_env
 args=(bisync "$RES" rescrypt: --conflict-resolve newer --resilient --recover --max-lock 2m
       --exclude ".DS_Store" --exclude "._*" --verbose)
 [ "$dry" -eq 1 ] && args+=(--dry-run)
 [ "$resync" -eq 1 ] && args+=(--resync)
 
-sm_info "[$(sm_host)] resources-sync$([ "$resync" -eq 1 ] && echo ' (resync)')$([ "$dry" -eq 1 ] && echo ' (dry run)')"
+cc_info "[$(cc_host)] resources-sync$([ "$resync" -eq 1 ] && echo ' (resync)')$([ "$dry" -eq 1 ] && echo ' (dry run)')"
 if ! rclone "${args[@]}"; then
-  sm_die "$EX_FAIL" "bisync failed. If it says the baseline is missing or out of date: resources-sync --resync --dry-run, then --resync --yes"
+  cc_die "$EX_FAIL" "bisync failed. If it says the baseline is missing or out of date: resources-sync --resync --dry-run, then --resync --yes"
 fi

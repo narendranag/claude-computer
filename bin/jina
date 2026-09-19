@@ -6,24 +6,24 @@
 #   jina --search "query"      search → markdown results (s.jina.ai)
 #   jina ... --json            JSON response instead of markdown
 #
-# Secret: Bitwarden item "system-manager/jina", password field = API key.
+# Secret: Bitwarden item "claude-computer/jina", password field = API key.
 # Reader works without a key at a low rate limit; set JINA_NO_KEY=1 to skip Bitwarden.
 # Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/bw missing · 4 locked · 5 item missing
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
-sm_need curl
+cc_wants_help "$@"
+cc_need curl
 
 search=0; json=0; arg=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --search) search=1; shift ;;
     --json) json=1; shift ;;
-    -*) sm_usage >&2; exit "$EX_USAGE" ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
     *) arg="${arg:+$arg }$1"; shift ;;
   esac
 done
-[ -n "$arg" ] || { sm_usage >&2; exit "$EX_USAGE" ; }
+[ -n "$arg" ] || { cc_usage >&2; exit "$EX_USAGE" ; }
 
 accept="Accept: text/plain"
 [ "$json" -eq 1 ] && accept="Accept: application/json"
@@ -37,6 +37,6 @@ fi
 if [ "${JINA_NO_KEY:-0}" = "1" ]; then
   curl -sS --fail-with-body --max-time 60 -H "$accept" "$target" || exit "$EX_FAIL"
 else
-  key="$(sm_secret jina)"
-  sm_curl "Authorization: Bearer $key" -H "$accept" "$target" || exit "$EX_FAIL"
+  key="$(cc_secret jina)"
+  cc_curl "Authorization: Bearer $key" -H "$accept" "$target" || exit "$EX_FAIL"
 fi

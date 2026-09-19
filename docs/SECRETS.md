@@ -6,20 +6,20 @@ Unlock once per login session, in a terminal: `secrets-unlock` (or the `unlock` 
 
 ## Items the scripts expect
 
-All names start with `system-manager/` (override with `SM_BW_PREFIX`). Create each when you first need it — nothing breaks until a wrapper that uses it runs, and then it exits with code 5 and names the missing item.
+All names start with `claude-computer/` (override with `CC_BW_PREFIX`). Create each when you first need it — nothing breaks until a wrapper that uses it runs, and then it exits with code 5 and names the missing item.
 
 | Item | Type | Fields | Used by |
 |---|---|---|---|
-| `system-manager/telegram` | Login | password = bot token · custom field `chat_id` | `tg-send`, hooks |
-| `system-manager/tavily` | Login | password = API key | `tavily` |
-| `system-manager/firecrawl` | Login | password = API key | `firecrawl`, `feeds-sync` |
-| `system-manager/jina` | Login | password = API key | `jina` |
-| `system-manager/exa` | Login | password = API key | `exa` |
-| `system-manager/r2` | Login | username = access key ID · password = secret access key · custom fields `endpoint` (`https://<account-id>.r2.cloudflarestorage.com`), `bucket` | `archive-*`, `camera-ingest`, `resources-sync` |
-| `system-manager/r2-crypt` | Login | password = crypt password · custom field `salt` | `resources-sync` |
-| `system-manager/google-credentials` | Secure note | notes = the downloaded OAuth client `credentials.json` | `gcal`, `gmail`, `gdrive` |
-| `system-manager/google-token` | Secure note | written by the first Google wrapper run | `gcal`, `gmail`, `gdrive` |
-| `system-manager/posthog-<app>` | Login | password = project API key | apps, via `.envrc` |
+| `claude-computer/telegram` | Login | password = bot token · custom field `chat_id` | `tg-send`, hooks |
+| `claude-computer/tavily` | Login | password = API key | `tavily` |
+| `claude-computer/firecrawl` | Login | password = API key | `firecrawl`, `feeds-sync` |
+| `claude-computer/jina` | Login | password = API key | `jina` |
+| `claude-computer/exa` | Login | password = API key | `exa` |
+| `claude-computer/r2` | Login | username = access key ID · password = secret access key · custom fields `endpoint` (`https://<account-id>.r2.cloudflarestorage.com`), `bucket` | `archive-*`, `camera-ingest`, `resources-sync` |
+| `claude-computer/r2-crypt` | Login | password = crypt password · custom field `salt` | `resources-sync` |
+| `claude-computer/google-credentials` | Secure note | notes = the downloaded OAuth client `credentials.json` | `gcal`, `gmail`, `gdrive` |
+| `claude-computer/google-token` | Secure note | written by the first Google wrapper run | `gcal`, `gmail`, `gdrive` |
+| `claude-computer/posthog-<app>` | Login | password = project API key | apps, via `.envrc` |
 
 **Losing `r2-crypt` means losing `~/resources` in R2.** It cannot be recovered from the bucket. Keep Bitwarden's own recovery (emergency access or an export stored offline) in order.
 

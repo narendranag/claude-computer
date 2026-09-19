@@ -37,7 +37,7 @@ Beyond `vscode-extensions.txt`.
 User agents in `~/Library/LaunchAgents` and daemons this machine owns, by label.
 
 - `com.github.domt4.homebrew-autoupdate`
-- `local.system-manager.*` — tasks-sync, transcripts-sync (watches the MacParakeet database), feeds-sync …
+- `local.claude-computer.*` — tasks-sync, transcripts-sync (watches the MacParakeet database), feeds-sync …
 - `com.google.*` — Chrome updaters (a glob covers a vendor's helpers)
 
 ## Listening ports (checked)

@@ -2,8 +2,8 @@
 
 Every machine this brain manages. A machine not listed here is out of scope.
 
-- **Manager** machines have a clone of `system-manager` and run Claude Code.
-- **Headless** machines have no brain; a manager reaches them over SSH via Tailscale. Each keeps a copy of its file at `/etc/system-manager/machine.md`.
+- **Manager** machines have a clone of `claude-computer` and run Claude Code.
+- **Headless** machines have no brain; a manager reaches them over SSH via Tailscale. Each keeps a copy of its file at `/etc/claude-computer/machine.md`.
 
 | Host | Role | Kind | Tailscale name | Brewfile layers | Managed by | File |
 |---|---|---|---|---|---|---|

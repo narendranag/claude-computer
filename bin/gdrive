@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import google_auth  # noqa: E402
-import sm  # noqa: E402
+import cc  # noqa: E402
 
 EXPORTS = {
     "application/vnd.google-apps.document": ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"),
@@ -54,10 +54,10 @@ def main() -> int:
     try:
         a = ap.parse_args()
     except SystemExit:
-        return sm.EX_USAGE
+        return cc.EX_USAGE
     if a.help or not a.cmd:
         print(__doc__)
-        return sm.EX_OK if a.help else sm.EX_USAGE
+        return cc.EX_OK if a.help else cc.EX_USAGE
 
     from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
@@ -87,7 +87,7 @@ def main() -> int:
         if dest.is_dir():
             dest = dest / name
         if dest.exists():
-            raise sm.SMError(sm.EX_FAIL, f"{dest} exists; not overwriting")
+            raise cc.CCError(cc.EX_FAIL, f"{dest} exists; not overwriting")
         buf = io.BytesIO()
         dl = MediaIoBaseDownload(buf, req)
         done = False
@@ -100,7 +100,7 @@ def main() -> int:
     if a.cmd == "upload":
         p = Path(a.path)
         if not p.is_file():
-            raise sm.SMError(sm.EX_USAGE, f"no such file: {p}")
+            raise cc.CCError(cc.EX_USAGE, f"no such file: {p}")
         body = {"name": p.name, **({"parents": [a.folder]} if a.folder else {})}
         f = files.create(body=body, media_body=MediaFileUpload(str(p), resumable=True),
                          fields="id,webViewLink").execute()
@@ -114,4 +114,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sm.run_main(main)
+    cc.run_main(main)

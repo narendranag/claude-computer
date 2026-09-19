@@ -2,7 +2,7 @@
 
 Import from a uv script with:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-    import sm
+    import cc
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ from pathlib import Path
 
 EX_OK, EX_FAIL, EX_USAGE, EX_DEPS, EX_LOCKED, EX_CONFIG = 0, 1, 2, 3, 4, 5
 ROOT = Path(__file__).resolve().parent.parent
-BW_PREFIX = os.environ.get("SM_BW_PREFIX", "system-manager/")
-_KC_SERVICE = "system-manager-bw-session"
+BW_PREFIX = os.environ.get("CC_BW_PREFIX", "claude-computer/")
+_KC_SERVICE = "claude-computer-bw-session"
 
 
-class SMError(Exception):
+class CCError(Exception):
     def __init__(self, code: int, msg: str):
         super().__init__(msg)
         self.code = code
@@ -48,7 +48,7 @@ def _load_session() -> None:
         )
         s = r.stdout.strip() if r.returncode == 0 else ""
     else:
-        f = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "system-manager-bw-session"
+        f = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "claude-computer-bw-session"
         s = f.read_text().strip() if f.is_file() else ""
     if s:
         os.environ["BW_SESSION"] = s
@@ -56,20 +56,20 @@ def _load_session() -> None:
 
 def _bw(*args: str, stdin: str | None = None) -> str:
     if not shutil.which("bw"):
-        raise SMError(EX_DEPS, "missing dependency: bw")
+        raise CCError(EX_DEPS, "missing dependency: bw")
     _load_session()
     r = subprocess.run(["bw", *args], input=stdin, capture_output=True, text=True)
     if r.returncode != 0:
-        raise SMError(EX_FAIL, f"bw {args[0]} failed: {r.stderr.strip()}")
+        raise CCError(EX_FAIL, f"bw {args[0]} failed: {r.stderr.strip()}")
     return r.stdout
 
 
 def require_unlocked() -> None:
     status = json.loads(_bw("status") or "{}").get("status", "unauthenticated")
     if status == "unauthenticated":
-        raise SMError(EX_LOCKED, "Bitwarden not logged in. Run: bw login")
+        raise CCError(EX_LOCKED, "Bitwarden not logged in. Run: bw login")
     if status != "unlocked":
-        raise SMError(EX_LOCKED, "Bitwarden is locked. Run: secrets-unlock (in a terminal)")
+        raise CCError(EX_LOCKED, "Bitwarden is locked. Run: secrets-unlock (in a terminal)")
 
 
 def secret(name: str, field: str = "password") -> str:
@@ -82,10 +82,10 @@ def secret(name: str, field: str = "password") -> str:
         else:
             data = json.loads(_bw("get", "item", item))
             v = next((f["value"] for f in data.get("fields") or [] if f["name"] == field), "")
-    except SMError:
+    except CCError:
         v = ""
     if not v:
-        raise SMError(EX_CONFIG, f"Bitwarden item '{item}' has no '{field}'. See docs/SECRETS.md")
+        raise CCError(EX_CONFIG, f"Bitwarden item '{item}' has no '{field}'. See docs/SECRETS.md")
     return v
 
 
@@ -95,7 +95,7 @@ def set_note(name: str, notes: str) -> None:
     item = BW_PREFIX + name
     try:
         data = json.loads(_bw("get", "item", item))
-    except SMError:
+    except CCError:
         data = None
     if data is None:
         tmpl = json.loads(_bw("get", "template", "item"))
@@ -111,10 +111,10 @@ def _encode(obj: dict) -> str:
 
 
 def run_main(fn) -> None:
-    """Run fn(); turn SMError into '<script>: msg' on stderr and its exit code."""
+    """Run fn(); turn CCError into '<script>: msg' on stderr and its exit code."""
     try:
         sys.exit(fn() or 0)
-    except SMError as e:
+    except CCError as e:
         print(f"{Path(sys.argv[0]).name}: {e}", file=sys.stderr)
         sys.exit(e.code)
     except KeyboardInterrupt:

@@ -1,4 +1,4 @@
-# ~/.config/starship.toml — linked from ~/system-manager/dotfiles/starship.toml
+# ~/.config/starship.toml — linked from ~/claude-computer/dotfiles/starship.toml
 add_newline = false
 format = "$hostname$directory$git_branch$git_status$python$nodejs$cmd_duration$line_break$character"
 

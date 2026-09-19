@@ -20,7 +20,7 @@ Python and TypeScript. Nothing else unless a platform forces it (Swift for a Mac
 
 ## Every repo has
 
-- `CLAUDE.md` — what this project is, who it is for, how to run it, and a pointer to `~/system-manager/docs/`
+- `CLAUDE.md` — what this project is, who it is for, how to run it, and a pointer to `~/claude-computer/docs/`
 - `TASKS.md` — `## Now / ## Next / ## Later / ## Done`
 - `README.md`, `.editorconfig`, `.gitignore`
 - a `justfile` (or `Makefile`) with `setup`, `test`, `lint`, `run`

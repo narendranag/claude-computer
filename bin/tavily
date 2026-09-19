@@ -8,12 +8,12 @@
 #   --depth     basic (default, cheaper) or advanced
 #   --json      raw API response
 #
-# Secret: Bitwarden item "system-manager/tavily", password field = API key.
+# Secret: Bitwarden item "claude-computer/tavily", password field = API key.
 # Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/bw missing · 4 locked · 5 item missing
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
-sm_need curl jq
+cc_wants_help "$@"
+cc_need curl jq
 
 n=5; depth=basic; json=0; query=""
 while [ $# -gt 0 ]; do
@@ -21,17 +21,17 @@ while [ $# -gt 0 ]; do
     -n) n="${2:?}"; shift 2 ;;
     --depth) depth="${2:?}"; shift 2 ;;
     --json) json=1; shift ;;
-    -*) sm_usage >&2; exit "$EX_USAGE" ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
     *) query="${query:+$query }$1"; shift ;;
   esac
 done
-[ -n "$query" ] || { sm_usage >&2; exit "$EX_USAGE"; }
+[ -n "$query" ] || { cc_usage >&2; exit "$EX_USAGE"; }
 
-key="$(sm_secret tavily)"
+key="$(cc_secret tavily)"
 body="$(jq -n --arg q "$query" --argjson n "$n" --arg d "$depth" \
   '{query:$q, max_results:$n, search_depth:$d, include_answer:true}')"
-resp="$(sm_curl "Authorization: Bearer $key" -H 'Content-Type: application/json' \
-  -d "$body" https://api.tavily.com/search)" || sm_die "$EX_FAIL" "API error: $resp"
+resp="$(cc_curl "Authorization: Bearer $key" -H 'Content-Type: application/json' \
+  -d "$body" https://api.tavily.com/search)" || cc_die "$EX_FAIL" "API error: $resp"
 
 if [ "$json" -eq 1 ]; then printf '%s\n' "$resp"; exit 0; fi
 printf '%s' "$resp" | jq -r '

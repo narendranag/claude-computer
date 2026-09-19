@@ -8,12 +8,12 @@
 #   --chars N   text excerpt per result (default 800)
 #   --json      raw API response
 #
-# Secret: Bitwarden item "system-manager/exa", password field = API key.
+# Secret: Bitwarden item "claude-computer/exa", password field = API key.
 # Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/bw missing · 4 locked · 5 item missing
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
-sm_wants_help "$@"
-sm_need curl jq
+cc_wants_help "$@"
+cc_need curl jq
 
 n=5; chars=800; json=0; query=""
 while [ $# -gt 0 ]; do
@@ -21,17 +21,17 @@ while [ $# -gt 0 ]; do
     -n) n="${2:?}"; shift 2 ;;
     --chars) chars="${2:?}"; shift 2 ;;
     --json) json=1; shift ;;
-    -*) sm_usage >&2; exit "$EX_USAGE" ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
     *) query="${query:+$query }$1"; shift ;;
   esac
 done
-[ -n "$query" ] || { sm_usage >&2; exit "$EX_USAGE"; }
+[ -n "$query" ] || { cc_usage >&2; exit "$EX_USAGE"; }
 
-key="$(sm_secret exa)"
+key="$(cc_secret exa)"
 body="$(jq -n --arg q "$query" --argjson n "$n" --argjson c "$chars" \
   '{query:$q, type:"auto", numResults:$n, contents:{text:{maxCharacters:$c}}}')"
-resp="$(sm_curl "x-api-key: $key" -H 'Content-Type: application/json' \
-  -d "$body" https://api.exa.ai/search)" || sm_die "$EX_FAIL" "API error: $resp"
+resp="$(cc_curl "x-api-key: $key" -H 'Content-Type: application/json' \
+  -d "$body" https://api.exa.ai/search)" || cc_die "$EX_FAIL" "API error: $resp"
 
 if [ "$json" -eq 1 ]; then printf '%s\n' "$resp"; exit 0; fi
 printf '%s' "$resp" | jq -r '.results[] | "## [\(.title // .url)](\(.url))\n\n\(.text // "")\n"'
