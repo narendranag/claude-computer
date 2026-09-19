@@ -215,7 +215,7 @@ def alert_unassigned(count: int, today: dt.date, dry: bool) -> bool:
         return False
     tg = Path(__file__).resolve().parent / "tg-send"
     r = subprocess.run([str(tg), f"{count} unassigned tasks in the vault — run /review to give them owners"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
     if r.returncode == 0:
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps({**state, "unassigned_alerted_on": today.isoformat(), "count": count}))

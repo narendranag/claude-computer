@@ -43,7 +43,7 @@ BREW_LINE = re.compile(r'^\s*(brew|cask|mas)\s+"([^"]+)"')
 
 def run(cmd: list[str]) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=120).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
@@ -258,7 +258,7 @@ def main() -> int:
     sec_rc = 0
     if "security" in only:
         print("\n## security")
-        sec_rc = subprocess.run([str(ROOT / "bin" / "security-check")]).returncode
+        sec_rc = subprocess.run([str(ROOT / "bin" / "security-check")], check=False).returncode
 
     print(f"\n[{host}] {'no drift' if drift == 0 else f'{drift} drift items'}; security {'ok' if sec_rc == 0 else 'FAIL'}")
     return 0 if drift == 0 and sec_rc == 0 else 1

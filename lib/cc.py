@@ -31,7 +31,7 @@ class CCError(Exception):
 
 def host() -> str:
     if shutil.which("scutil"):
-        r = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True)
+        r = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True, check=False)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
     return socket.gethostname().split(".")[0]
@@ -44,7 +44,7 @@ def _load_session() -> None:
     if platform.system() == "Darwin":
         r = subprocess.run(
             ["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", _KC_SERVICE, "-w"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, check=False,
         )
         s = r.stdout.strip() if r.returncode == 0 else ""
     else:
@@ -58,7 +58,7 @@ def _bw(*args: str, stdin: str | None = None) -> str:
     if not shutil.which("bw"):
         raise CCError(EX_DEPS, "missing dependency: bw")
     _load_session()
-    r = subprocess.run(["bw", *args], input=stdin, capture_output=True, text=True)
+    r = subprocess.run(["bw", *args], input=stdin, capture_output=True, text=True, check=False)
     if r.returncode != 0:
         raise CCError(EX_FAIL, f"bw {args[0]} failed: {r.stderr.strip()}")
     return r.stdout

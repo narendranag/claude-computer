@@ -53,7 +53,7 @@ def clean(text: str, limit: int = 280) -> str:
 
 def run(cmd: list[str], stdin: str | None = None, timeout: int = 120) -> tuple[int, str]:
     try:
-        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=timeout, check=False)
         return r.returncode, r.stdout
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
