@@ -10,10 +10,12 @@ brain is this repo: read CLAUDE.md now and follow it.
 
 Start with this computer. This is a new machine, so run /setup:
 
-1. Identify this machine (hostname, hardware, macOS version) and ask me its role
-   (client, build, server) and a one-line purpose. Write
-   docs/machines/<host>.md from docs/machines/_example.md, add it to
-   docs/FLEET.md, and append the decision to docs/DECISIONS.md.
+1. Identify this machine (hostname, hardware, macOS version). Tell me the
+   hostname you will use as its name in the fleet and let me confirm it or
+   rename the machine first. Then ask me its role (client, build, server) and a
+   one-line purpose. Write docs/machines/<host>.md from
+   docs/machines/_example.md, add it to docs/FLEET.md, and append the decision
+   to docs/DECISIONS.md.
 2. Create an SSH key for this machine only, add it to GitHub with gh, and push
    this repo.
 3. Install Tailscale and walk me through logging in. Record the

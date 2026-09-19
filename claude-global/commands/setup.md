@@ -22,6 +22,8 @@ Before each numbered phase, tell me in three lines what you are about to do and 
 ## 1. Identity
 
 - Host: `scutil --get LocalHostName`. Hardware: `system_profiler SPHardwareDataType`. OS: `sw_vers`. CPU: `uname -m` (Apple silicon or Intel changes what installs).
+- **Show me the hostname and say it is this machine's name in the fleet** — `docs/machines/<host>.md`, and every commit tagged `[<host>]`. Ask me to confirm it or rename the machine before you write anything. Renaming is mine to do: `sudo scutil --set LocalHostName <name>`; wait, then read the hostname again.
+- Say how many machines this repo already knows: the files in `docs/machines/` other than `_example.md`, by name. On a second machine that is the fleet this one is joining, and one shared repo is the point.
 - If `docs/machines/<host>.md` exists, read it and treat this as a **rebuild**: skip questions it already answers.
 - Otherwise ask me: role (client / build / server), one-line purpose, and whether sshd should be on. Write `docs/machines/<host>.md` from `docs/machines/_example.md`; add a row to `docs/FLEET.md` with `—` for the Tailscale name and Brewfile layers (filled in phases 3 and 6); append the decision to `docs/DECISIONS.md`.
 
