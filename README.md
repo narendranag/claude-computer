@@ -262,10 +262,13 @@ vault/
   notes/       flat. atomic ideas, meetings, decisions. no subfolders
   people/      one note per person who keeps coming up
   projects/    one hub note per brain
-  sources/     transcripts, articles, feed digests
+  sources/     articles, feed digests
+    transcripts/   raw transcripts, once processed
   maps/        maps of content, all tasks, weekly reviews
   _templates/
 ```
+
+**`vault-setup` makes the vault, plugins and all.** The `obsidian` cask is an empty app until something creates the vault and installs what the brain depends on, so [`bin/vault-setup`](bin/vault-setup) does both: `templates/vault/` into `~/vault` as a git repo with the secret scan, then Obsidian Git, Dataview and Templater — looked up by id in [Obsidian's own registry](https://github.com/obsidianmd/obsidian-releases) and taken from each repo's latest release. That is third-party code running with your notes open, so every source URL and version is printed as it is fetched and recorded in `.obsidian/plugins/VERSIONS.md`; the binaries stay out of the vault repo and `vault-setup` restores them on the next machine. Your Obsidian settings are never clobbered — the plugin list is merged, defaults are written only where no file exists. Two steps it cannot do for you, and prints instead: turning off restricted mode the first time Obsidian opens the vault, and installing the **Obsidian Web Clipper** browser extension, where one setting matters — save clips to `inbox/`.
 
 **Properties over folders.** Every note carries `type`, `created`, `tags`, `status`, `people`, `project`, `source`, and Claude enforces the schema when it files. Structure lives in frontmatter, where Dataview can query it, instead of in a folder tree nobody maintains.
 
@@ -279,7 +282,7 @@ vault/
 | A meeting                | record in MacParakeet                                                                                        | `transcripts-sync` exports each completed transcript to `inbox/transcripts/` — a launchd agent watches the app's database, so it just appears |
 | A file, a URL, a podcast | `macparakeet-cli transcribe <input> --no-history --output-dir ~/vault/inbox/transcripts --format transcript` | none — `--no-history` keeps it out of the database, so nothing is exported twice                                                              |
 
-`transcripts-sync` reads the database read-only past a per-machine cursor, and stamps every note with the recording's id, so a lost cursor can't duplicate anything and a transcript you've already processed is never overwritten. `/transcripts` then does the thinking: a five-line summary with decisions and open questions in `notes/`, people linked, **every action item routed to the brain that owns it** under `## Next` with a link back, and the raw transcript filed in `sources/transcripts/`. Action items nobody owns go to `## Unassigned` — which sits at the top of the task map, must be emptied by every weekly review, and pings Telegram once it passes ten.
+`transcripts-sync` reads the database read-only past a per-machine cursor, and stamps every note with the recording's id, so a lost cursor can't duplicate anything and a transcript you've already processed is never overwritten. `/transcripts` then does the thinking: a five-line summary with decisions and open questions in `notes/`, people linked, **every action item routed to the brain that owns it** under `## Next` with a link back, and the raw transcript filed in `sources/transcripts/`. Action items nobody owns go to `## Unassigned` — which sits at the top of the task map, must be emptied by every weekly review, and while it holds more than ten pings Telegram once a day.
 
 **The reading pipeline.** `bin/feeds-sync` runs every morning: RSS through `feedparser`, full text through Firecrawl for sites that only publish teasers, falling back to `browse` for pages that need a real browser, and newsletters pulled from Gmail — which is also the clean route for paywalled outlets, whose RSS carries only headlines. It writes one digest per day into `sources/feeds/`, and the daily note links to it. Clipping from the browser uses **Obsidian Web Clipper** pointed at `inbox/`. `/inbox` then files everything.
 
@@ -297,6 +300,7 @@ vault/
 | Session start / end | every session       | hooks → `git pull`, `tasks-sync` / commit + push `docs/`, `tg-send`    |
 | New machine         | rare                | `/setup` → Brewfiles, `setup-tools.sh`, `map-check`                    |
 | New project         | often               | `/new-app` → `bin/new-app`                                             |
+| New vault           | once per machine    | `vault-setup` → the vault, its plugins, its Obsidian config            |
 | Meeting transcripts | on recording        | `transcripts-sync` (watches the MacParakeet database) → `/transcripts` |
 | Process inbox       | daily               | `/inbox` (transcripts first, then `quick.md`, then the rest)           |
 | Daily note          | 06:30 + on demand   | scheduled draft + `/today`                                             |
