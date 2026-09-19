@@ -10,12 +10,17 @@
 #   --no-push      skip the R2 cold copy
 #   --eject        eject the card after a fully verified ingest
 #
+# Which files: SM_CAMERA_EXTS, space-separated and case-insensitive. The default covers the
+# common RAW and video formats — RAF CR2 CR3 NEF ARW DNG ORF RW2 MOV MP4 — so a card from a
+# borrowed body ingests without editing anything. One body's worth:
+#   SM_CAMERA_EXTS="NEF MOV" camera-ingest /Volumes/Untitled harbour-walk
+#
 # Layout:  ~/library/camera/YYYY/YYYY-MM-DD_<shoot>/YYYYMMDD_HHMMSS_<seq>.<ext>
 #          one folder per capture date; <seq> is the camera's own frame number.
 # Each folder gets SHA256SUMS. ~/library/camera/index.csv gains one exiftool row per file.
 # Never deletes anything from the card. Re-running is safe: identical files are skipped.
 #
-# Env: SM_CAMERA (default ~/library/camera)
+# Env: SM_CAMERA (default ~/library/camera) · SM_CAMERA_EXTS (default as above)
 # Exit codes: 0 ok · 1 copy/verify/push failed · 2 usage · 3 exiftool/rclone missing · 4 locked · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
@@ -37,13 +42,21 @@ done
 [ -d "$card" ] && [ -n "$shoot" ] || { sm_usage >&2; exit "$EX_USAGE"; }
 [[ "$shoot" =~ ^[a-z0-9][a-z0-9-]*$ ]] || sm_die "$EX_USAGE" "shoot name: lowercase letters, digits, dashes"
 
-exts="-ext RAF -ext MOV"
+# One `-ext` per extension. The default is deliberately broad — a card from a borrowed
+# body should ingest without editing the script.
+SM_CAMERA_EXTS="${SM_CAMERA_EXTS:-RAF CR2 CR3 NEF ARW DNG ORF RW2 MOV MP4}"
+exts=""
+for e in $SM_CAMERA_EXTS; do exts="$exts -ext $e"; done
 [ "$jpg" -eq 1 ] && exts="$exts -ext JPG"
+[ -n "$exts" ] || sm_die "$EX_USAGE" "SM_CAMERA_EXTS is empty"
+# The index always covers JPGs, whether or not this run ingested them.
+index_exts="$exts"
+case " $index_exts " in *" -ext JPG "*) ;; *) index_exts="$index_exts -ext JPG" ;; esac
 
 # One exiftool pass: source path, capture time, frame number from the filename.
 # shellcheck disable=SC2086,SC2016
 list="$(exiftool -r -q -m $exts -d '%Y%m%d_%H%M%S' -p '$Directory/$FileName	$DateTimeOriginal	$FileModifyDate' "$card" 2>/dev/null || true)"
-[ -n "$list" ] || sm_die "$EX_FAIL" "no RAF/MOV files found under $card"
+[ -n "$list" ] || sm_die "$EX_FAIL" "no files with extension $SM_CAMERA_EXTS found under $card (override with SM_CAMERA_EXTS)"
 
 copied=0; skipped=0; failed=0; folders=""
 while IFS=$'\t' read -r src taken modified; do
@@ -84,7 +97,8 @@ for f in $folders; do
   rel="${f#"$LIB"/}"
   grep -v "^$rel/" "$index" > "$index.tmp" || true; mv "$index.tmp" "$index"
   # Unreadable metadata must not fail an ingest whose copies already verified.
-  (cd "$LIB" && exiftool -q -q -m -csv -ext RAF -ext MOV -ext JPG \
+  # shellcheck disable=SC2086
+  (cd "$LIB" && exiftool -q -q -m -csv $index_exts \
     -DateTimeOriginal -Model -LensModel -FocalLength -FNumber -ExposureTime -ISO -Rating -ImageSize "$rel" 2>/dev/null | tail -n +2) >> "$index" || true
 done
 
