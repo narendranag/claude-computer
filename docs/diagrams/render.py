@@ -589,7 +589,7 @@ def draw_loop(t: dict) -> str:
     card(s, 48, ry, W - 96, 108, fill=t["sunk"])
     s.icon_github(66, ry + 16, t["git"])
     s.text(96, ry + 31, "claude-computer", 15, 700, mono=True)
-    s.text(242, ry + 31, "private · cloned on every manager", 12.5, 400, t["muted"])
+    s.text(258, ry + 31, "private · cloned on every manager", 12.5, 400, t["muted"])
     files = [
         ("machines/laptop.md", "written only by laptop", t["claude"]),
         ("machines/desktop.md", "written only by desktop", t["hand"]),
