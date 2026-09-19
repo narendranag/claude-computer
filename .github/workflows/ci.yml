@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           : > shell-scripts.txt
           : > python-scripts.txt
-          for f in bin/* lib/*.sh ./*.sh .githooks/* claude-global/hooks/*.sh; do
+          for f in bin/* lib/*.sh ./*.sh tests/*.sh .githooks/* claude-global/hooks/*.sh; do
             [ -f "$f" ] || continue
             case "$(head -1 -- "$f")" in
               *bash*|*' sh'|*/sh)     echo "$f" >> shell-scripts.txt ;;
@@ -54,6 +54,13 @@ jobs:
         run: |
           set -euo pipefail
           while read -r f; do bash -n "$f"; done < shell-scripts.txt
+
+      # install.sh runs before this repo exists on the machine, so it is the one script with
+      # no lib/common.sh under it. Its dry-run matrix stubs every probe; CC_INSTALL_TEST_UNAME_S
+      # in the test itself is the only way past the macOS gate, so this passes on ubuntu without
+      # the gate being weakened for anyone else.
+      - name: install.sh dry-run matrix
+        run: ./tests/install-dry-run.sh
 
       - name: --help works
         run: |
