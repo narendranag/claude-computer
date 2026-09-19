@@ -69,13 +69,20 @@
       "Bash(bw get:*)",
       "Bash(bw export:*)",
       "Bash(bw list:*)",
+      "Bash(bw unlock:*)",
+      "Bash(security find-generic-password:*)",
+      "Bash(security dump-keychain:*)",
+      "Bash(security export:*)",
+      "Bash(secrets-unlock --export)",
+      "Bash(~/system-manager/bin/secrets-unlock --export)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Read(~/.ssh/id_*)",
       "Read(**/.env)",
       "Read(**/.env.*)",
       "Read(~/.config/rclone/rclone.conf)",
-      "Read(~/.config/browse/profiles/**)"
+      "Read(~/.config/browse/profiles/**)",
+      "Read(~/Library/Keychains/**)"
     ]
   },
   "hooks": {
