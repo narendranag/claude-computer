@@ -1,4 +1,4 @@
-# Tasks — {{name}}
+# Tasks — __NAME__
 
 ## Now
 

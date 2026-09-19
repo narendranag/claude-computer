@@ -1,4 +1,4 @@
-# {{name}}
+# __NAME__
 
 <!-- /new-app replaces this stub. Keep it short: what, for whom, how to run it. -->
 
@@ -30,4 +30,4 @@ Secrets come from Bitwarden (`system-manager/<name>-*` items) through `.envrc` +
 
 ## Analytics and errors
 
-PostHog (key: Bitwarden `system-manager/posthog-{{name}}`), unless this project is private/zero-cost, in which case Bugsink on the fleet.
+PostHog (key: Bitwarden `system-manager/posthog-__NAME__`), unless this project is private/zero-cost, in which case Bugsink on the fleet.

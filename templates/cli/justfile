@@ -10,7 +10,7 @@ lint:
     uv run ruff check . && uv run ruff format --check . && uv run pyright
 
 run *args:
-    uv run {{name}} {{args}}
+    uv run __NAME__ {{args}}
 
 install:
     uv tool install --force .
