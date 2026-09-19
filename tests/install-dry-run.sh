@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/install-dry-run.sh — drive install.sh through twenty-two simulated machines.
+# tests/install-dry-run.sh — drive install.sh through thirty-seven simulated machines.
 #
 # Usage: ./tests/install-dry-run.sh
 #
@@ -22,7 +22,13 @@
 # (x) the template copy lands on the third poll · (xi) it never lands · (xii) resuming the
 # empty clone that left behind · (xiii) gh is owner-qualified · (xiv.a–e) is the existing
 # repo actually a private instance · (xv) an existing clone with a public origin warns only ·
-# (xvi) resuming refuses a public remote · (xvii) a created repo that is not private stops.
+# (xvi) resuming refuses a public remote · (xvii) a created repo that is not private stops ·
+# (xviii) --name alone does not move the clone directory · (xix) an explicit --dir still wins ·
+# (xx) a second machine with the same --name clones · (xxi.a–j) the repo-name question: the
+# default, a name of your own, an unusable one, three unusable ones, an existing instance
+# offered, a public fork not offered, --yes and no-terminal never asking, a re-ask after the
+# suitability gate, and --name still exiting 6 · (xxii) a default-looking hostname is noted ·
+# (xxiii) a hostname somebody chose is not.
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -191,6 +197,22 @@ exit 0
 EOF
 }
 
+# A gh where exactly one repo name exists: <dir> <name-fragment>. Everything else is absent,
+# which is what a case needs when the answer to "pick another name" must actually land
+# somewhere new. Authed, and the existing repo answers $CC_TEST_REPO_FACTS.
+stub_gh_named() {
+  local d="$1" pub="$2"
+  stub "$d" gh <<EOF
+case "\$*" in
+  *--json*)             case "\$*" in *"$pub"*) printf '%s\\n' "\$CC_TEST_REPO_FACTS"; exit 0 ;; esac; exit 1 ;;
+  "auth status")        exit 0 ;;
+  "api user --jq .login") echo octocat; exit 0 ;;
+  "repo view "*)        case "\$*" in *"$pub"*) exit 0 ;; esac; exit 1 ;;
+esac
+exit 0
+EOF
+}
+
 # isPrivate, isFork, isTemplate, parent — as `gh repo view --json … --jq '…|@tsv'` returns it.
 facts() { # facts <private> <fork> <template> [parent]
   printf '%s\t%s\t%s\t%s' "$1" "$2" "$3" "${4:-}"
@@ -249,7 +271,7 @@ base_env
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/no-brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/claude-computer" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/claude-computer" < /dev/null > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "→ Xcode Command Line Tools"
 contains "$D/out" "→ Homebrew"
@@ -443,7 +465,7 @@ base_env
 export CC_INSTALL_TEST_BREW_PREFIXES="$D/no-brew"
 export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
 export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
-PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/claude-computer" > "$D/out" 2>&1
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/claude-computer" < /dev/null > "$D/out" 2>&1
 check_exit 0 $?
 contains "$D/out" "the path is set but git or clang is broken"
 contains "$D/out" "git identity — checked once the Command Line Tools are in"
@@ -631,7 +653,8 @@ EOF
 
 # (a) the template itself, or any template repo
 suitability_case a "$(facts true false true)" 6 "is a template repository, not an instance"
-contains "$D/out" "--name my-claude-computer"
+contains "$D/out" "--name sys-admin --dir ~/claude-computer"
+contains "$D/out" "the same name on every machine you own"
 # The preflight names the problem instead of first promising a clone it then refuses.
 contains "$D/out" "is a TEMPLATE repo, not an instance"
 absent "$D/out" "cloning it instead of creating it"
@@ -736,6 +759,222 @@ contains "$D/out" "was created but is not private"
 contains "$D/out" "gh repo edit"
 log_lacks "$CC_STUB_LOG" "gh repo clone"
 unset CC_TEST_REMOTE
+
+# --------------------------------------------------------------------------
+# The repo name and the clone directory are different things. --name moves the repo on
+# GitHub; the directory stays ~/claude-computer, because the hooks (CC_HOME), every rule in
+# claude-global/settings.json and /setup itself are written against that path.
+#
+# HOME is moved into the case's own temp tree first: with --dir gone from the command line,
+# the installer computes $HOME/claude-computer, and a test must not read the real one.
+REAL_HOME="$HOME"
+
+banner "(xviii) --name alone leaves the directory at ~/claude-computer"
+D="$WORK/xviii"; mkdir -p "$D/bin" "$D/dev/usr/bin" "$D/home"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub_gh "$D/bin" yes no
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+base_env
+export HOME="$D/home"
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+export CC_INSTALL_TEST_HOSTNAME=mini
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --name sys-admin > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "repo: sys-admin · directory: ~/claude-computer"
+contains "$D/out" "repo: octocat/sys-admin · directory: ~/claude-computer"
+contains "$D/out" "cloned to $D/home/claude-computer"
+contains "$D/out" "gh repo create sys-admin --template narendranag/claude-computer --private"
+absent   "$D/out" "$D/home/sys-admin"
+contains "$D/out" "this machine will be docs/machines/mini.md in it"
+export HOME="$REAL_HOME"
+assert_no_mutation "$CC_STUB_LOG"
+
+banner "(xix) an explicit --dir still wins"
+D="$WORK/xix"; mkdir -p "$D/bin" "$D/dev/usr/bin" "$D/home"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub_gh "$D/bin" yes no
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+base_env
+export HOME="$D/home"
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --name sys-admin --dir "$D/elsewhere" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "directory: $D/elsewhere"
+contains "$D/out" "cloned to $D/elsewhere"
+export HOME="$REAL_HOME"
+
+banner "(xx) a second machine with the same --name clones instead of creating"
+D="$WORK/xx"; mkdir -p "$D/bin" "$D/dev/usr/bin"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub_gh "$D/bin" yes yes
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+base_env
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+export CC_INSTALL_TEST_HOSTNAME=mini
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --name sys-admin --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "octocat/sys-admin already exists on GitHub — cloning it instead of creating it"
+contains "$D/out" "same repo on every machine: this one will appear as docs/machines/mini.md"
+absent   "$D/out" "gh repo create"
+assert_no_mutation "$CC_STUB_LOG"
+
+# --------------------------------------------------------------------------
+# The question the plain one-liner asks. It is the only one before the checklist, it reads
+# stdin — the terminal in a real run, the heredoc here — and a dry run asks it too, because
+# a question changes nothing and seeing the real name in the plan is the point of one.
+#
+# prompt_case <label> <authed> <remote> <facts> — leaves the case's dir in $D, output in
+# $D/out, and the installer waiting on whatever the caller pipes in.
+prompt_case() {
+  local label="$1" authed="$2" remote="$3" f="$4"
+  banner "(xxi.$label)"
+  D="$WORK/p$label"; mkdir -p "$D/bin" "$D/dev/usr/bin"
+  export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+  stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+  stub_brew "$D/bin" yes
+  stub_gh "$D/bin" "$authed" "$remote"
+  stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+  base_env
+  export CC_TEST_REPO_FACTS="$f"
+  export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+  export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+  export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+  export CC_INSTALL_TEST_HOSTNAME=mini
+}
+
+# (a) an empty answer takes the default
+prompt_case a yes no "$(facts true false false)"
+printf '\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "What should your private repo be called?"
+contains "$D/out" "It is ONE repo for every machine you own: use the same name on each."
+contains "$D/out" "Repo name [claude-computer]:"
+contains "$D/out" "repo: octocat/claude-computer · directory: $D/cc"
+assert_no_mutation "$CC_STUB_LOG"
+
+# (b) a name of your own
+prompt_case b yes no "$(facts true false false)"
+printf 'sys-admin\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "repo: octocat/sys-admin · directory: $D/cc"
+contains "$D/out" "gh repo create sys-admin --template"
+
+# (c) an unusable name is refused and asked again
+prompt_case c yes no "$(facts true false false)"
+printf 'my fleet/repo\nsys-admin\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "not a usable GitHub repo name"
+contains "$D/out" "repo: octocat/sys-admin"
+
+# (d) three unusable names and it stops, before anything is touched
+prompt_case d yes no "$(facts true false false)"
+printf 'a b\nc/d\n..\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 2 $?
+contains "$D/out" "no usable repo name after three tries"
+assert_no_mutation "$CC_STUB_LOG"
+
+# (e) an existing private instance is found and offered as the Enter answer
+prompt_case e yes yes "$(facts true false false)"
+printf '\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "Found your existing private repo octocat/claude-computer"
+contains "$D/out" "this machine will join that fleet"
+contains "$D/out" "cloning it instead of creating it"
+contains "$D/out" "docs/machines/mini.md"
+
+# (f) the contributor's public fork is named as unusable, not offered, and sys-admin suggested
+prompt_case f yes yes "$(facts false true false narendranag/claude-computer)"
+stub_gh_named "$D/bin" claude-computer
+printf 'sys-admin\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "octocat/claude-computer exists, but it is public"
+contains "$D/out" "for example sys-admin"
+absent   "$D/out" "Repo name [claude-computer]:"
+absent   "$D/out" "Found your existing private repo"
+contains "$D/out" "repo: octocat/sys-admin"
+
+# (g) --yes never asks, and neither does a run with no terminal
+prompt_case g yes no "$(facts true false false)"
+printf 'sys-admin\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+absent "$D/out" "What should your private repo be called?"
+contains "$D/out" "repo: octocat/claude-computer"
+
+prompt_case h yes no "$(facts true false false)"
+unset CC_INSTALL_TEST_TTY
+printf 'sys-admin\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+absent "$D/out" "What should your private repo be called?"
+contains "$D/out" "repo: octocat/claude-computer"
+export CC_INSTALL_TEST_TTY=1
+
+# (i) a name typed at the prompt that turns out to be public: asked again, not exit 6
+prompt_case i yes yes "$(facts false false false)"
+stub_gh_named "$D/bin" sys-admin
+printf 'sys-admin\nsomething-else\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "is PUBLIC — a machine map must not be pushed there"
+contains "$D/out" "Pick another name for your private repo"
+contains "$D/out" "octocat/something-else does not exist yet"
+contains "$D/out" "repo: octocat/something-else · directory: $D/cc"
+assert_no_mutation "$CC_STUB_LOG"
+
+# (j) --name is a decision already made: a bad one still stops at exit 6
+prompt_case j yes yes "$(facts false false false)"
+stub_gh_named "$D/bin" sys-admin
+printf 'something-else\n' | PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --name sys-admin --dir "$D/cc" > "$D/out" 2>&1
+check_exit 6 $?
+absent "$D/out" "Pick another name for your private repo"
+
+# --------------------------------------------------------------------------
+# A machine still called what macOS called it. The hostname is what names its file in the
+# shared repo, so the installer says so and hands over the one command that changes it.
+banner "(xxii) a default-looking hostname gets a note"
+D="$WORK/xxii"; mkdir -p "$D/bin" "$D/dev/usr/bin"
+export CC_STUB_LOG="$D/log"; : > "$CC_STUB_LOG"
+stub_clt "$D/bin" "$D/dev"; stub_pbcopy "$D/bin"
+stub_brew "$D/bin" yes
+stub_gh "$D/bin" yes no
+stub "$D/bin" claude <<'EOF'
+exit 0
+EOF
+base_env
+export CC_INSTALL_TEST_BREW_PREFIXES="$D/bin/brew"
+export CC_INSTALL_TEST_CLAUDE_NATIVE="$D/no-claude"
+export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
+export CC_INSTALL_TEST_HOSTNAME=Someones-MacBook-Pro
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
+check_exit 0 $?
+contains "$D/out" "machines are identified by hostname, not by repo name"
+contains "$D/out" "sudo scutil --set LocalHostName mini"
+
+banner "(xxiii) a hostname somebody chose is left alone"
+export CC_INSTALL_TEST_HOSTNAME=mini
+PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/cc2" > "$D/out2" 2>&1
+check_exit 0 $?
+contains "$D/out2" "docs/machines/mini.md"
+absent   "$D/out2" "machines are identified by hostname, not by repo name"
+unset CC_INSTALL_TEST_HOSTNAME
 
 # --------------------------------------------------------------------------
 printf '\n%s\n' "$PASS passed, $FAIL failed"

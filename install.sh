@@ -12,12 +12,13 @@
 # edit any shell profile but the single `brew shellenv` line; download anything but the
 # official Homebrew installer and whatever brew and gh fetch; phone home.
 #
-# Exit codes: 0 ok · 1 a step failed · 2 usage or no terminal · 3 not macOS · 4 something is
-# already at the target directory · 5 the Command Line Tools installer never finished · 6 the
-# repo of that name is not a private instance (the template itself, or a public fork).
+# Exit codes: 0 ok · 1 a step failed · 2 usage, no terminal, or no usable repo name after
+# three tries · 3 not macOS · 4 something is already at the target directory · 5 the Command
+# Line Tools installer never finished · 6 the repo of that name is not a private instance
+# (the template itself, or a public fork).
 set -euo pipefail
 
-VERSION="0.3.0"
+VERSION="0.3.1"
 TEMPLATE="${CC_INSTALL_TEMPLATE:-narendranag/claude-computer}"
 BREW_INSTALLER_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
 
@@ -35,11 +36,17 @@ Usage:
   becomes $0, so flags need a placeholder in front of them. Run from a local checkout it is
   just `./install.sh --dry-run`.
 
+With no flags it asks you one question — what your private repo should be called —
+and then does the rest. Every machine you own uses the same answer.
+
 Flags:
-  --dry-run        print every command it would run; change nothing, ask nothing
-  --yes            do not pause for confirmation between steps
-  --dir <path>     where the clone goes (default: $HOME/claude-computer)
-  --name <repo>    the name of your private repo (default: claude-computer)
+  --dry-run        print every command it would run; change nothing on the machine. It asks
+                   only for the repo name, and only with a terminal and no --name
+  --yes            do not pause for confirmation, and do not ask for the repo name
+  --dir <path>     where the clone goes. Default $HOME/claude-computer whatever --name says,
+                   because the hooks, the permission rules and /setup all assume that path
+  --name <repo>    the name of your private GitHub repo (default: claude-computer). ONE repo
+                   is shared by the whole fleet — pass the same name on every machine
   --public-clone   do not create a private copy; clone the template read-only, to look first
   --help           this text
   --version        print the version and exit
@@ -51,17 +58,25 @@ Environment:
 
 A real run needs a terminal on stdin, which is why the command above is
 `bash -c "$(curl …)"` and not `curl … | bash`: the Homebrew installer's sudo prompt and
-`gh auth login` both read from the terminal, and a pipe takes it away. `--dry-run`, `--help`
-and `--version` change nothing and ask nothing, so they work down a pipe too.
+`gh auth login` both read from the terminal, and a pipe takes it away. `--help` and
+`--version` change nothing and ask nothing. `--dry-run` changes nothing either, and down a
+pipe it asks nothing — with a terminal it asks the repo-name question, which changes nothing.
+
+One repo, every machine. The repo name is not how a machine is identified: that is the
+hostname, `scutil --get LocalHostName`, which becomes docs/machines/<host>.md inside the one
+shared repo. Run this on a second machine with the same --name and it clones that repo
+rather than creating a second one.
 
 A repo of the right name is not automatically your instance: on the template owner's account
 it IS the template, and on a contributor's it is most likely a public fork. Before cloning
-an existing repo as your fleet brain, this checks that it is private and not a template, and
-stops with exit 6 if it is not — your instance holds a map of your machines.
+an existing repo as your fleet brain, this checks that it is private and not a template. An
+interactive run asks for another name; otherwise it stops with exit 6 — your instance holds
+a map of your machines.
 
-Exit codes: 0 ok · 1 a step failed · 2 usage, or a real run with no terminal · 3 not macOS ·
-4 something is already at the target directory · 5 the Command Line Tools installer never
-finished · 6 the repo of that name is not a private instance.
+Exit codes: 0 ok · 1 a step failed · 2 usage, a real run with no terminal, or no usable repo
+name after three tries · 3 not macOS · 4 something is already at the target directory · 5 the
+Command Line Tools installer never finished · 6 the repo of that name is not a private
+instance.
 EOF
 }
 
@@ -79,6 +94,7 @@ EOF
 #   CC_INSTALL_TEST_ADMIN           yes | no
 #   CC_INSTALL_TEST_DISK_KB         free KB to report instead of asking df
 #   CC_INSTALL_TEST_SKIP_NET        1 = skip the reachability probe
+#   CC_INSTALL_TEST_HOSTNAME        value of `scutil --get LocalHostName`
 # ---------------------------------------------------------------------------
 
 # ---- output ---------------------------------------------------------------
@@ -104,6 +120,7 @@ DRY=0
 ASSUME_YES=0
 PUBLIC_CLONE=0
 NAME="claude-computer"
+NAME_GIVEN=0
 DIR=""
 
 while [ $# -gt 0 ]; do
@@ -112,7 +129,7 @@ while [ $# -gt 0 ]; do
     --yes|-y)       ASSUME_YES=1; shift ;;
     --public-clone) PUBLIC_CLONE=1; shift ;;
     --dir)          [ $# -ge 2 ] || die 2 "--dir needs a path"; DIR="$2"; shift 2 ;;
-    --name)         [ $# -ge 2 ] || die 2 "--name needs a repo name"; NAME="$2"; shift 2 ;;
+    --name)         [ $# -ge 2 ] || die 2 "--name needs a repo name"; NAME="$2"; NAME_GIVEN=1; shift 2 ;;
     -h|--help)      usage; exit 0 ;;
     --version)      say "install.sh $VERSION"; exit 0 ;;
     --)             shift ;;
@@ -120,7 +137,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$DIR" ] || DIR="$HOME/$NAME"
+# The directory is load-bearing in a way the repo name is not. The hooks fall back to
+# ~/claude-computer through CC_HOME, every rule in claude-global/settings.json is written
+# against ~/claude-computer/bin/…, and /setup refuses to run anywhere else. So --name moves
+# the repo on GitHub and nothing on disk: the default destination is ~/claude-computer
+# whatever the repo is called, and only an explicit --dir changes it.
+[ -n "$DIR" ] || DIR="$HOME/claude-computer"
 case "$DIR" in /*) ;; *) DIR="$PWD/$DIR" ;; esac
 PARENT="$(dirname "$DIR")"
 DISPLAY_DIR="$DIR"
@@ -182,6 +204,227 @@ if ! is_tty; then
     exit 2
   fi
 fi
+
+# ---- the repo -------------------------------------------------------------
+# One private repo, shared by the whole fleet. --name is that repo's name on GitHub and
+# nothing else: a machine is identified inside the repo by its hostname, so every machine
+# passes — or answers with — the same name, and the laptop can see and fix the Mini.
+
+GH_ACCOUNT=""
+
+# Always owner-qualified once the account is known: a bare `gh repo view <name>` run from
+# inside some other git repo can resolve against that repo's remote rather than the account.
+REPO_SLUG="$NAME"
+set_repo_slug() {
+  if [ -n "$GH_ACCOUNT" ]; then REPO_SLUG="$GH_ACCOUNT/$NAME"; else REPO_SLUG="$NAME"; fi
+}
+gh_repo_exists() {
+  set_repo_slug
+  gh repo view "$REPO_SLUG" >/dev/null 2>&1
+}
+
+# A repo of the right *name* is not necessarily an instance. On the template owner's account
+# `claude-computer` IS the template; on a contributor's it is most likely a public fork of
+# it. Cloning either as your fleet brain would put a map of your machines — hostnames, ports,
+# what is installed and listening — into a public repo. So the name is not enough: ask what
+# the repo actually is.
+#
+# `gh --jq` is gh's own built-in, so this needs no jq on the machine; jq arrives much later,
+# with the Brewfile.
+REPO_PRIVATE=""; REPO_FORK=""; REPO_TEMPLATE=""; REPO_PARENT=""
+gh_repo_facts() {
+  local out
+  set_repo_slug
+  out="$(gh repo view "$REPO_SLUG" --json isPrivate,isFork,isTemplate,parent \
+    --jq '[.isPrivate, .isFork, .isTemplate, (.parent.nameWithOwner // "")] | @tsv' 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  REPO_PRIVATE="$(printf '%s' "$out" | cut -f1)"
+  REPO_FORK="$(printf '%s' "$out" | cut -f2)"
+  REPO_TEMPLATE="$(printf '%s' "$out" | cut -f3)"
+  REPO_PARENT="$(printf '%s' "$out" | cut -f4)"
+  return 0
+}
+
+# ok | template | public | privatefork
+REPO_VERDICT=""
+classify_repo() {
+  if [ "$REPO_TEMPLATE" = "true" ] || [ "$REPO_SLUG" = "$TEMPLATE" ]; then
+    REPO_VERDICT="template"
+  elif [ "$REPO_PRIVATE" != "true" ]; then
+    REPO_VERDICT="public"
+  elif [ "$REPO_FORK" = "true" ]; then
+    REPO_VERDICT="privatefork"
+  else
+    REPO_VERDICT="ok"
+  fi
+}
+
+# Why an existing repo of that name cannot be the fleet brain. Printed before anything on
+# the machine has changed, by both the refusal and the re-ask.
+explain_unsuitable_repo() {
+  case "$REPO_VERDICT" in
+    template)
+      err "$REPO_SLUG is a template repository, not an instance."
+      say "That is the thing you copy, not the copy. Give your instance another name — and use"
+      say "the same name on every machine you own:"
+      say ""
+      say "  … -- --name sys-admin --dir ~/claude-computer"
+      say ""
+      ;;
+    public)
+      err "$REPO_SLUG is public."
+      if [ "$REPO_FORK" = "true" ]; then
+        say "It looks like a public fork${REPO_PARENT:+ of $REPO_PARENT}, not a private instance."
+      fi
+      say "Your instance holds a map of your machines — hostnames, ports, what is installed and"
+      say "listening — so it has to be private. Either give the instance another name, using the"
+      say "same name on every machine you own:"
+      say ""
+      say "  … -- --name sys-admin --dir ~/claude-computer"
+      say ""
+      say "or make this one private first:  gh repo edit $REPO_SLUG --visibility private"
+      ;;
+  esac
+}
+
+refuse_unsuitable_repo() {
+  case "$REPO_VERDICT" in
+    template|public) explain_unsuitable_repo; exit 6 ;;
+  esac
+}
+
+# GitHub's rules, near enough: letters, digits, dot, dash, underscore; not . or ..; ≤100.
+valid_repo_name() {
+  case "$1" in
+    ""|.|..) return 1 ;;
+    *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 100 ]
+}
+
+# A question changes nothing, so a dry run may ask it; --yes and a pipe may not.
+can_ask() {
+  [ "$ASSUME_YES" -eq 0 ] || return 1
+  is_tty
+}
+
+# read_name <prompt> → NAME_REPLY. Reads stdin, which is the terminal in a real run and the
+# harness's answers under test.
+NAME_REPLY=""
+read_name() {
+  printf '%s' "$1"
+  read -r NAME_REPLY || NAME_REPLY=""
+}
+
+ONE_REPO_LINE="It is ONE repo for every machine you own: use the same name on each."
+
+# The first question the installer asks, and with no flags the only one before the checklist.
+# If gh is already logged in it looks first: an existing private instance of the default name
+# is offered as the Enter answer, and one that cannot be an instance — the template, or the
+# public fork every contributor has — is named as such and not offered.
+ask_repo_name() {
+  local tries=0 offer="" why=""
+
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    GH_ACCOUNT="$(gh api user --jq .login 2>/dev/null || true)"
+  fi
+
+  if [ -n "$GH_ACCOUNT" ] && gh_repo_exists; then
+    if gh_repo_facts; then classify_repo; else REPO_VERDICT="unknown"; fi
+    case "$REPO_VERDICT" in
+      ok|privatefork) offer="$REPO_SLUG" ;;
+      template) why="it is a template repository, not an instance" ;;
+      public)   why="it is public, and a map of your machines must not go there" ;;
+    esac
+  fi
+  # Nothing learned here may leak into the preflight's own verdict for the chosen name.
+  REPO_VERDICT=""; REPO_PRIVATE=""; REPO_FORK=""; REPO_TEMPLATE=""; REPO_PARENT=""
+
+  say ""
+  if [ -n "$offer" ]; then
+    say "  Found your existing private repo ${C_B}$offer${C_0} — press Enter to use it"
+    say "  (this machine will join that fleet)."
+  elif [ -n "$why" ]; then
+    say "  ${C_Y}$REPO_SLUG exists, but $why.${C_0}"
+    say "  So pick another name for your private repo — for example ${C_B}sys-admin${C_0}."
+  fi
+
+  say "  What should your private repo be called? $ONE_REPO_LINE"
+  while [ "$tries" -lt 3 ]; do
+    tries=$((tries + 1))
+    if [ -n "$why" ]; then
+      read_name "  Repo name: "
+    else
+      read_name "  Repo name [claude-computer]: "
+      [ -n "$NAME_REPLY" ] || NAME_REPLY="claude-computer"
+    fi
+    if valid_repo_name "$NAME_REPLY"; then
+      NAME="$NAME_REPLY"
+      set_repo_slug
+      return 0
+    fi
+    warn "not a usable GitHub repo name: letters, digits, dot, dash and underscore only."
+  done
+  die 2 "no usable repo name after three tries."
+}
+
+# The suitability gate said no. Interactively that is a question, not a wall: ask for another
+# name and settle REMOTE_STATE / REPO_VERDICT for it. A scripted run still exits 6.
+reask_or_refuse() {
+  local tries=0
+  if [ "$NAME_GIVEN" -eq 1 ] || ! can_ask; then
+    refuse_unsuitable_repo
+    return 0
+  fi
+  explain_unsuitable_repo
+  say "  Pick another name for your private repo. $ONE_REPO_LINE"
+  while [ "$tries" -lt 3 ]; do
+    tries=$((tries + 1))
+    read_name "  Repo name: "
+    if ! valid_repo_name "$NAME_REPLY"; then
+      warn "not a usable GitHub repo name: letters, digits, dot, dash and underscore only."
+      continue
+    fi
+    NAME="$NAME_REPLY"
+    set_repo_slug
+    if ! gh_repo_exists; then
+      REMOTE_STATE="absent"; REPO_VERDICT=""
+      have "$REPO_SLUG does not exist yet — it will be created from the template"
+      return 0
+    fi
+    if gh_repo_facts; then classify_repo; else REPO_VERDICT="unknown"; fi
+    case "$REPO_VERDICT" in
+      template|public) explain_unsuitable_repo ;;
+      *) REMOTE_STATE="exists"; return 0 ;;
+    esac
+  done
+  die 2 "no usable repo name after three tries."
+}
+
+# ---- this machine's name in the fleet -------------------------------------
+# The repo name plays no part in it: CLAUDE.md has Claude read `scutil --get LocalHostName`
+# and write docs/machines/<host>.md, and tag its commits [<host>].
+local_hostname() {
+  if [ -n "${CC_INSTALL_TEST_HOSTNAME:-}" ]; then printf '%s' "$CC_INSTALL_TEST_HOSTNAME"; return 0; fi
+  scutil --get LocalHostName 2>/dev/null || true
+}
+
+# "Someones-MacBook-Pro" and friends: the name macOS made up, which nobody meant.
+hostname_looks_default() {
+  case "$1" in
+    *MacBook*|*Mac-mini*|*Mac-Studio*|*Mac-Pro*|*iMac*|*MacPro*|*s-Mac*) return 0 ;;
+  esac
+  [ "${#1}" -gt 24 ]
+}
+
+hostname_note() {
+  local h="$1"
+  [ -n "$h" ] || return 0
+  hostname_looks_default "$h" || return 0
+  needs_you "machines are identified by hostname, not by repo name, and \"$h\" is the name macOS"
+  say "    made up. To change it before /setup — yours to run, it needs sudo:"
+  say "      ${C_D}sudo scutil --set LocalHostName mini${C_0}"
+}
 
 # ---- probes ---------------------------------------------------------------
 uname_s() { printf '%s' "${CC_INSTALL_TEST_UNAME_S:-$(uname -s)}"; }
@@ -275,8 +518,20 @@ STEP="preflight"
 
 say ""
 say "${C_B}claude-computer installer${C_0} ${C_D}$VERSION${C_0}"
-say "${C_D}template: $TEMPLATE · destination: $DIR${C_0}"
 if [ "$DRY" -eq 1 ]; then say "${C_Y}dry run — nothing on this machine will change.${C_0}"; fi
+
+# The one question, and only when nobody has answered it already. A dry run may ask it: a
+# question changes nothing, and seeing the real repo name in the plan is the point of one.
+# Not on a machine this installer is about to refuse: the macOS check is two lines below.
+if [ "$NAME_GIVEN" -eq 0 ] && [ "$PUBLIC_CLONE" -eq 0 ] && [ "$(uname_s)" = "Darwin" ] && can_ask; then
+  ask_repo_name
+else
+  set_repo_slug
+fi
+
+say ""
+say "${C_D}template: $TEMPLATE${C_0}"
+say "${C_D}repo: ${GH_ACCOUNT:+$GH_ACCOUNT/}$NAME · directory: $DISPLAY_DIR${C_0}"
 
 head2 "The machine"
 
@@ -437,80 +692,6 @@ if [ -e "$DIR" ]; then
   fi
 fi
 
-# Always owner-qualified once the account is known: a bare `gh repo view <name>` run from
-# inside some other git repo can resolve against that repo's remote rather than the account.
-REPO_SLUG="$NAME"
-set_repo_slug() {
-  if [ -n "$GH_ACCOUNT" ]; then REPO_SLUG="$GH_ACCOUNT/$NAME"; fi
-}
-gh_repo_exists() {
-  set_repo_slug
-  gh repo view "$REPO_SLUG" >/dev/null 2>&1
-}
-
-# A repo of the right *name* is not necessarily an instance. On the template owner's account
-# `claude-computer` IS the template; on a contributor's it is most likely a public fork of
-# it. Cloning either as your fleet brain would put a map of your machines — hostnames, ports,
-# what is installed and listening — into a public repo. So the name is not enough: ask what
-# the repo actually is.
-#
-# `gh --jq` is gh's own built-in, so this needs no jq on the machine; jq arrives much later,
-# with the Brewfile.
-REPO_PRIVATE=""; REPO_FORK=""; REPO_TEMPLATE=""; REPO_PARENT=""
-gh_repo_facts() {
-  local out
-  set_repo_slug
-  out="$(gh repo view "$REPO_SLUG" --json isPrivate,isFork,isTemplate,parent \
-    --jq '[.isPrivate, .isFork, .isTemplate, (.parent.nameWithOwner // "")] | @tsv' 2>/dev/null)" || return 1
-  [ -n "$out" ] || return 1
-  REPO_PRIVATE="$(printf '%s' "$out" | cut -f1)"
-  REPO_FORK="$(printf '%s' "$out" | cut -f2)"
-  REPO_TEMPLATE="$(printf '%s' "$out" | cut -f3)"
-  REPO_PARENT="$(printf '%s' "$out" | cut -f4)"
-  return 0
-}
-
-# ok | template | public | privatefork
-REPO_VERDICT=""
-classify_repo() {
-  if [ "$REPO_TEMPLATE" = "true" ] || [ "$REPO_SLUG" = "$TEMPLATE" ]; then
-    REPO_VERDICT="template"
-  elif [ "$REPO_PRIVATE" != "true" ]; then
-    REPO_VERDICT="public"
-  elif [ "$REPO_FORK" = "true" ]; then
-    REPO_VERDICT="privatefork"
-  else
-    REPO_VERDICT="ok"
-  fi
-}
-
-# Called before anything on the machine has changed.
-refuse_unsuitable_repo() {
-  case "$REPO_VERDICT" in
-    template)
-      err "$REPO_SLUG is a template repository, not an instance."
-      say "That is the thing you copy, not the copy. Give your instance another name:"
-      say ""
-      say "  … -- --name my-claude-computer"
-      say ""
-      exit 6
-      ;;
-    public)
-      err "$REPO_SLUG is public."
-      if [ "$REPO_FORK" = "true" ]; then
-        say "It looks like a public fork${REPO_PARENT:+ of $REPO_PARENT}, not a private instance."
-      fi
-      say "Your instance holds a map of your machines — hostnames, ports, what is installed and"
-      say "listening — so it has to be private. Either give the instance another name:"
-      say ""
-      say "  … -- --name my-claude-computer"
-      say ""
-      say "or make this one private first:  gh repo edit $REPO_SLUG --visibility private"
-      exit 6
-      ;;
-  esac
-}
-
 REMOTE_STATE="unknown"
 if [ "$PUBLIC_CLONE" -eq 1 ]; then
   REMOTE_STATE="skipped"
@@ -563,28 +744,48 @@ elif [ "$DIR_STATE" = "occupied" ]; then
   exit 4
 elif [ "$REMOTE_STATE" = "exists" ]; then
   # The verdict comes first: promising to clone it and then refusing in the next breath reads
-  # like a bug. An unsuitable repo gets a ! line naming the problem, then the refusal.
+  # like a bug. An unsuitable repo gets a ! line naming the problem, then the refusal — or,
+  # interactively, another go at the name.
   case "$REPO_VERDICT" in
     template)
       needs_you "$REPO_SLUG exists on GitHub but is a TEMPLATE repo, not an instance — nothing can be cloned from it as your fleet brain"
-      refuse_unsuitable_repo
+      reask_or_refuse
       ;;
     public)
       needs_you "$REPO_SLUG exists on GitHub but is PUBLIC — a machine map must not be pushed there, so it cannot be your instance"
-      refuse_unsuitable_repo
+      reask_or_refuse
       ;;
   esac
-  will "$REPO_SLUG already exists on GitHub — cloning it instead of creating it (this is the second-machine path)"
-  case "$REPO_VERDICT" in
-    privatefork) have "it is a private fork${REPO_PARENT:+ of $REPO_PARENT} — that is fine, using it" ;;
-    ok) have "it is private and not a template — an instance, as expected" ;;
-    unknown) needs_you "could not read whether $REPO_SLUG is private — confirm it is before /setup pushes a machine map to it" ;;
-  esac
+  if [ "$REMOTE_STATE" = "exists" ]; then
+    will "$REPO_SLUG already exists on GitHub — cloning it instead of creating it (this is the second-machine path)"
+    case "$REPO_VERDICT" in
+      privatefork) have "it is a private fork${REPO_PARENT:+ of $REPO_PARENT} — that is fine, using it" ;;
+      ok) have "it is private and not a template — an instance, as expected" ;;
+      unknown) needs_you "could not read whether $REPO_SLUG is private — confirm it is before /setup pushes a machine map to it" ;;
+    esac
+    THIS_HOST="$(local_hostname)"
+    if [ -n "$THIS_HOST" ]; then
+      say "  ${C_D}same repo on every machine: this one will appear as docs/machines/$THIS_HOST.md${C_0}"
+    fi
+    hostname_note "$THIS_HOST"
+  else
+    will "a private $NAME from the $TEMPLATE template, cloned to $DIR"
+  fi
 elif [ "$REMOTE_STATE" = "absent" ]; then
   will "a private $NAME from the $TEMPLATE template, cloned to $DIR"
+  THIS_HOST="$(local_hostname)"
+  if [ -n "$THIS_HOST" ]; then
+    say "  ${C_D}one repo for the whole fleet: this machine will be docs/machines/$THIS_HOST.md in it${C_0}"
+  fi
+  hostname_note "$THIS_HOST"
 else
   will "a private $NAME from the $TEMPLATE template, cloned to $DIR (checked after you log in)"
 fi
+
+# The two things people conflate, said plainly and last, after any re-ask has settled the
+# name: the repo is on GitHub and may be called anything; the directory is load-bearing.
+set_repo_slug
+say "  ${C_D}repo: $REPO_SLUG · directory: $DISPLAY_DIR${C_0}"
 
 head2 "What stays yours"
 say "  Every login and every password. This script never reads, writes or asks for a credential."
@@ -716,11 +917,19 @@ if [ "$DO_GH_AUTH" -eq 1 ]; then
             if [ "$DIR_STATE" = "clone" ]; then
               needs_you "$REPO_SLUG is not a private instance — check the clone's origin before /setup pushes a map"
             else
-              refuse_unsuitable_repo
+              reask_or_refuse
             fi
             ;;
           privatefork) info "  $REPO_SLUG is a private fork${REPO_PARENT:+ of $REPO_PARENT} — using it" ;;
         esac
+      fi
+      if [ "$REMOTE_STATE" = "exists" ] && [ "$DIR_STATE" != "clone" ]; then
+        info "  $REPO_SLUG already exists — this is the second-machine path: it will be cloned, not created"
+        THIS_HOST="$(local_hostname)"
+        if [ -n "$THIS_HOST" ]; then
+          info "  same repo on every machine: this one will appear as docs/machines/$THIS_HOST.md"
+        fi
+        hostname_note "$THIS_HOST"
       fi
     fi
   fi
