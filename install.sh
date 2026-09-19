@@ -13,7 +13,8 @@
 # official Homebrew installer and whatever brew and gh fetch; phone home.
 #
 # Exit codes: 0 ok · 1 a step failed · 2 usage or no terminal · 3 not macOS · 4 something is
-# already at the target directory · 5 the Command Line Tools installer never finished.
+# already at the target directory · 5 the Command Line Tools installer never finished · 6 the
+# repo of that name is not a private instance (the template itself, or a public fork).
 set -euo pipefail
 
 VERSION="0.2.1"
@@ -48,12 +49,19 @@ Environment:
                         Set it if you are installing from a fork.
   NO_COLOR              set to anything to turn colour off.
 
-It must be run with a terminal on stdin, which is why the command above is
+A real run needs a terminal on stdin, which is why the command above is
 `bash -c "$(curl …)"` and not `curl … | bash`: the Homebrew installer's sudo prompt and
-`gh auth login` both read from the terminal, and a pipe takes it away.
+`gh auth login` both read from the terminal, and a pipe takes it away. `--dry-run`, `--help`
+and `--version` change nothing and ask nothing, so they work down a pipe too.
 
-Exit codes: 0 ok · 1 a step failed · 2 usage or no terminal · 3 not macOS · 4 something is
-already at the target directory · 5 the Command Line Tools installer never finished.
+A repo of the right name is not automatically your instance: on the template owner's account
+it IS the template, and on a contributor's it is most likely a public fork. Before cloning
+an existing repo as your fleet brain, this checks that it is private and not a template, and
+stops with exit 6 if it is not — your instance holds a map of your machines.
+
+Exit codes: 0 ok · 1 a step failed · 2 usage, or a real run with no terminal · 3 not macOS ·
+4 something is already at the target directory · 5 the Command Line Tools installer never
+finished · 6 the repo of that name is not a private instance.
 EOF
 }
 
@@ -158,14 +166,21 @@ is_tty() {
 # ---- terminal gate --------------------------------------------------------
 # `curl … | bash` puts the download on stdin. The Homebrew installer's sudo prompt and
 # `gh auth login` both need the terminal there instead, so refuse rather than hang.
+#
+# A dry run changes nothing and asks nothing, so it has no use for a terminal: let it
+# through, including down a pipe, and say once that the real thing needs one.
 if ! is_tty; then
-  err "no terminal on stdin."
-  say "Run it this way instead, so the installers can ask you for a password:"
-  say ""
-  say "  /bin/bash -c \"\$(curl -fsSL https://claude-computer.com/install.sh)\""
-  say ""
-  say "Not: curl … | bash — the pipe takes the terminal away."
-  exit 2
+  if [ "$DRY" -eq 1 ]; then
+    say "(No terminal on stdin. Fine for --dry-run; a real run needs one — see --help.)"
+  else
+    err "no terminal on stdin."
+    say "Run it this way instead, so the installers can ask you for a password:"
+    say ""
+    say "  /bin/bash -c \"\$(curl -fsSL https://claude-computer.com/install.sh)\""
+    say ""
+    say "Not: curl … | bash — the pipe takes the terminal away."
+    exit 2
+  fi
 fi
 
 # ---- probes ---------------------------------------------------------------
@@ -425,9 +440,75 @@ fi
 # Always owner-qualified once the account is known: a bare `gh repo view <name>` run from
 # inside some other git repo can resolve against that repo's remote rather than the account.
 REPO_SLUG="$NAME"
-gh_repo_exists() {
+set_repo_slug() {
   if [ -n "$GH_ACCOUNT" ]; then REPO_SLUG="$GH_ACCOUNT/$NAME"; fi
+}
+gh_repo_exists() {
+  set_repo_slug
   gh repo view "$REPO_SLUG" >/dev/null 2>&1
+}
+
+# A repo of the right *name* is not necessarily an instance. On the template owner's account
+# `claude-computer` IS the template; on a contributor's it is most likely a public fork of
+# it. Cloning either as your fleet brain would put a map of your machines — hostnames, ports,
+# what is installed and listening — into a public repo. So the name is not enough: ask what
+# the repo actually is.
+#
+# `gh --jq` is gh's own built-in, so this needs no jq on the machine; jq arrives much later,
+# with the Brewfile.
+REPO_PRIVATE=""; REPO_FORK=""; REPO_TEMPLATE=""; REPO_PARENT=""
+gh_repo_facts() {
+  local out
+  set_repo_slug
+  out="$(gh repo view "$REPO_SLUG" --json isPrivate,isFork,isTemplate,parent \
+    --jq '[.isPrivate, .isFork, .isTemplate, (.parent.nameWithOwner // "")] | @tsv' 2>/dev/null)" || return 1
+  [ -n "$out" ] || return 1
+  REPO_PRIVATE="$(printf '%s' "$out" | cut -f1)"
+  REPO_FORK="$(printf '%s' "$out" | cut -f2)"
+  REPO_TEMPLATE="$(printf '%s' "$out" | cut -f3)"
+  REPO_PARENT="$(printf '%s' "$out" | cut -f4)"
+  return 0
+}
+
+# ok | template | public | privatefork
+REPO_VERDICT=""
+classify_repo() {
+  if [ "$REPO_TEMPLATE" = "true" ] || [ "$REPO_SLUG" = "$TEMPLATE" ]; then
+    REPO_VERDICT="template"
+  elif [ "$REPO_PRIVATE" != "true" ]; then
+    REPO_VERDICT="public"
+  elif [ "$REPO_FORK" = "true" ]; then
+    REPO_VERDICT="privatefork"
+  else
+    REPO_VERDICT="ok"
+  fi
+}
+
+# Called before anything on the machine has changed.
+refuse_unsuitable_repo() {
+  case "$REPO_VERDICT" in
+    template)
+      err "$REPO_SLUG is a template repository, not an instance."
+      say "That is the thing you copy, not the copy. Give your instance another name:"
+      say ""
+      say "  … -- --name my-claude-computer"
+      say ""
+      exit 6
+      ;;
+    public)
+      err "$REPO_SLUG is public."
+      if [ "$REPO_FORK" = "true" ]; then
+        say "It looks like a public fork${REPO_PARENT:+ of $REPO_PARENT}, not a private instance."
+      fi
+      say "Your instance holds a map of your machines — hostnames, ports, what is installed and"
+      say "listening — so it has to be private. Either give the instance another name:"
+      say ""
+      say "  … -- --name my-claude-computer"
+      say ""
+      say "or make this one private first:  gh repo edit $REPO_SLUG --visibility private"
+      exit 6
+      ;;
+  esac
 }
 
 REMOTE_STATE="unknown"
@@ -437,6 +518,24 @@ elif [ "$DO_GH_AUTH" -eq 0 ] && command -v gh >/dev/null 2>&1; then
   if gh_repo_exists; then REMOTE_STATE="exists"; else REMOTE_STATE="absent"; fi
 fi
 
+# What the existing repo actually is. An existing local clone is only warned about: /setup
+# and the Stop hook have their own guard against pushing a map to a public remote, and the
+# clone is already on disk either way, so refusing here would stop a machine that is
+# otherwise fine. A repo we are about to clone fresh is refused outright.
+if [ "$REMOTE_STATE" = "exists" ]; then
+  if gh_repo_facts; then
+    classify_repo
+    if [ "$DIR_STATE" = "clone" ]; then
+      case "$REPO_VERDICT" in
+        template) needs_you "the clone at $DIR points at $REPO_SLUG, which is a TEMPLATE repo — check its origin before /setup pushes anything" ;;
+        public) needs_you "the clone at $DIR points at $REPO_SLUG, which is PUBLIC — a machine map must not be pushed there; fix its origin before /setup" ;;
+      esac
+    fi
+  else
+    REPO_VERDICT="unknown"
+  fi
+fi
+
 head2 "Your copy"
 if [ "$PUBLIC_CLONE" -eq 1 ]; then
   will "read-only clone of $TEMPLATE into $DIR (--public-clone: no repo of your own)"
@@ -444,12 +543,23 @@ elif [ "$DIR_STATE" = "clone" ]; then
   have "nothing to create — $DIR is already there"
 elif [ "$DIR_STATE" = "unfinished" ]; then
   will "the half-filled clone at $DIR finished off — no new repo is created"
+  # Resuming still means filling a local clone from a remote, so the remote still has to be
+  # an instance and not the template or a public fork.
+  case "$REPO_VERDICT" in
+    template|public) refuse_unsuitable_repo ;;
+  esac
 elif [ "$DIR_STATE" = "occupied" ]; then
   err "$DIR already exists and is not a claude-computer clone."
   say "Move it aside, or pass --dir <somewhere else>, and run this again."
   exit 4
 elif [ "$REMOTE_STATE" = "exists" ]; then
-  will "$GH_ACCOUNT/$NAME already exists on GitHub — cloning it instead of creating it (this is the second-machine path)"
+  will "$REPO_SLUG already exists on GitHub — cloning it instead of creating it (this is the second-machine path)"
+  case "$REPO_VERDICT" in
+    privatefork) have "it is a private fork${REPO_PARENT:+ of $REPO_PARENT} — that is fine, using it" ;;
+    ok) have "it is private and not a template — an instance, as expected" ;;
+    unknown) needs_you "could not read whether $REPO_SLUG is private — confirm it is before /setup pushes a machine map to it" ;;
+    *) refuse_unsuitable_repo ;;
+  esac
 elif [ "$REMOTE_STATE" = "absent" ]; then
   will "a private $NAME from the $TEMPLATE template, cloned to $DIR"
 else
@@ -577,6 +687,21 @@ if [ "$DO_GH_AUTH" -eq 1 ]; then
     # Now that we can ask, settle the question preflight had to leave open.
     if [ "$PUBLIC_CLONE" -eq 0 ] && [ "$REMOTE_STATE" = "unknown" ]; then
       if gh_repo_exists; then REMOTE_STATE="exists"; else REMOTE_STATE="absent"; fi
+      # The same suitability gate as the preflight, which could not run it before the login.
+      # Still before anything of yours is touched: only gh and brew have run so far.
+      if [ "$REMOTE_STATE" = "exists" ]; then
+        if gh_repo_facts; then classify_repo; else REPO_VERDICT="unknown"; fi
+        case "$REPO_VERDICT" in
+          template|public)
+            if [ "$DIR_STATE" = "clone" ]; then
+              needs_you "$REPO_SLUG is not a private instance — check the clone's origin before /setup pushes a map"
+            else
+              refuse_unsuitable_repo
+            fi
+            ;;
+          privatefork) info "  $REPO_SLUG is a private fork${REPO_PARENT:+ of $REPO_PARENT} — using it" ;;
+        esac
+      fi
     fi
   fi
 else
@@ -658,6 +783,21 @@ else
   # Two commands rather than the README's single `--clone`, so that --dir can point anywhere
   # and not just at ./<name> in the current directory.
   run gh repo create "$NAME" --template "$TEMPLATE" --private
+  # Belt and braces: confirm what was actually created is private before a machine map is
+  # ever written into it. An org default or a flag that silently did not take would
+  # otherwise only show up much later, in a public repo.
+  if [ "$DRY" -eq 0 ]; then
+    if ! gh_repo_facts; then
+      die 6 "cannot confirm $REPO_SLUG is private — refusing to clone it as your fleet brain"
+    elif [ "$REPO_PRIVATE" != "true" ]; then
+      err "$REPO_SLUG was created but is not private."
+      say "Your instance holds a map of your machines, so this stops here. Fix it with:"
+      say "  gh repo edit $REPO_SLUG --visibility private"
+      say "then run this again — it will take the 'already exists → clone' path."
+      exit 6
+    fi
+    say "  ${C_G}✓${C_0} $REPO_SLUG is private"
+  fi
   run gh repo clone "$NAME" "$DIR"
   NEED_WAIT=1
 fi
