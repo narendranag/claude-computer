@@ -29,6 +29,8 @@ You need a Mac on a recent macOS — recent enough that Homebrew still supports 
 
    It installs Xcode's Command Line Tools, Homebrew, `gh` and Claude Code, skipping whatever you already have; creates your private copy of this template at `~/claude-computer`; and puts the first prompt on your clipboard. **You type every password and do every login** — it never reads, writes or asks for a credential.
 
+   It asks one question: what your private repo should be called. Take the default and you get `<you>/claude-computer` cloned to `~/claude-computer` — and that is **one repo for every machine you own**, so on a second machine you run the same command and it clones that repo instead of creating another. Want a different name? I called mine `sys-admin`: `-- --name sys-admin --dir ~/claude-computer`, the same on every machine ([why, and what happens if you get it wrong](docs/INSTALL.md#one-repo-for-the-whole-fleet)).
+
    Read it before you run it — it is a shell script from the internet, and the whole premise here is that you stay the one who decides:
 
    ```bash
@@ -180,7 +182,7 @@ At the end, commit and push docs/ and tell me what is left.
 
 `/setup` covers foundation, environment and protection; it ends by queueing folders, brains and workflows in `TASKS.md` as the next jobs, so each gets its own conversation.
 
-**A second machine is the fifteen filled steps in the diagram**, not thirty-eight: the four commands, `gh repo clone <you>/claude-computer ~/claude-computer` instead of creating from the template, then `/setup` — which reads the repo, finds everything already decided, and asks only what's specific to this machine.
+**A second machine is the fifteen filled steps in the diagram**, not thirty-eight: the same install command, with the same repo name — the installer finds the repo already there and clones it instead of creating a second one — and then `/setup`, which reads the repo, finds everything already decided, and asks only what's specific to this machine. By hand it is `gh repo clone <you>/claude-computer ~/claude-computer` in place of creating from the template.
 
 ## The brain
 
@@ -200,7 +202,7 @@ At the end, commit and push docs/ and tell me what is left.
 
 **What goes in the map.** Identity and role; Tailscale name; what's installed beyond the Brewfile layers; VS Code extensions; launchd jobs; listening ports; services; where keys live (never the keys); sensitive locations; the security baseline. Sections marked _(checked)_ are parsed by `bin/map-check`, which diffs them against reality — `brew leaves`, `code --list-extensions`, the LaunchAgents directories, `lsof` — and then runs `bin/security-check`. **Drift is a bug**: fix the machine or fix the map, in the same session.
 
-**Per-machine files in one shared repo.** I started with "no shared map" — each machine keeps its own. It fell apart the first time one machine needed to manage another. Now the repo is shared and the _files_ are per machine: a laptop writes only `machines/laptop.md` plus the file of any headless box it changed. Conflicts are rare by construction, and when two managers touch the same box in overlapping sessions, the rebase surfaces it and Claude merges markdown well.
+**Per-machine files in one shared repo.** I started with "no shared map" — each machine keeps its own. It fell apart the first time one machine needed to manage another. Now the repo is shared and the _files_ are per machine: a laptop writes only `machines/laptop.md` plus the file of any headless box it changed. Conflicts are rare by construction, and when two managers touch the same box in overlapping sessions, the rebase surfaces it and Claude merges markdown well. **A machine's identity is its hostname, not the repo's name** — `scutil --get LocalHostName` picks the file it writes and tags its commits — so give each machine a name you would recognise (`sudo scutil --set LocalHostName mini`, [yours to run](docs/INSTALL.md#where-per-machine-identity-comes-from)) before `/setup`.
 
 **Hooks do the syncing, not discipline.** The `SessionStart` hook pulls with `--rebase --autostash`, reports whether Bitwarden is unlocked, and refreshes task copies in the vault. The `Stop` hook commits any `docs/` change as `[host] update …` and pushes, at the end of every turn — because sessions get killed far more often than they get exited.
 
@@ -352,7 +354,7 @@ vault/
 /bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)"
 ```
 
-It installs Xcode's Command Line Tools, Homebrew, `gh` and Claude Code, skipping what you already have, creates your private copy at `~/claude-computer`, and puts the first prompt on your clipboard. You type every password and do every login. Read it first with `curl -fsSL https://claude-computer.com/install.sh | less`, or see what it would do with `… -- --dry-run`. Flags and exit codes: [`docs/INSTALL.md`](docs/INSTALL.md).
+It installs Xcode's Command Line Tools, Homebrew, `gh` and Claude Code, skipping what you already have, asks what to call your private repo — one repo for the whole fleet, so the same answer on every machine — creates your copy at `~/claude-computer`, and puts the first prompt on your clipboard. You type every password and do every login. Read it first with `curl -fsSL https://claude-computer.com/install.sh | less`, or see what it would do with `… -- --dry-run`. Flags and exit codes: [`docs/INSTALL.md`](docs/INSTALL.md).
 
 By hand instead: the four commands in [The build](#the-build), then
 
