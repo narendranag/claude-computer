@@ -147,6 +147,7 @@ stub_gh() {
   stub "$d" gh <<EOF
 case "\$*" in
   "auth status") [ "$authed" = yes ] && exit 0 || exit 1 ;;
+  "api user"*) echo "you"; exit 0 ;;
   "api repos/"*) exit 1 ;;   # fall through to curl, which every case stubs
   *"repo view"*visibility*) [ "$vis" = none ] && exit 1 || { echo "$vis"; exit 0; } ;;
   *"repo view"*sshUrl*) echo "git@github.com:you/vault.git"; exit 0 ;;
@@ -233,6 +234,14 @@ case "$tracked" in
   *.obsidian/plugins/obsidian-git/manifest.json*) ok "plugin manifest.json is committed" ;;
   *) bad "manifest.json is not tracked" ;;
 esac
+# The work directory lives inside the vault, so `git add -A` used to commit a temporary file
+# and then delete it: junk in the history, a dirty tree on a brand-new vault.
+if [ -z "$(git -C "$VAULT" status --porcelain)" ]; then ok "the tree is clean after the first commit"
+else bad "dirty after the first commit: $(git -C "$VAULT" status --porcelain | tr '\n' ' ')"; fi
+case "$tracked" in
+  *.vault-setup.*) bad "a work-directory file was committed" ;;
+  *) ok "nothing from the work directory is tracked" ;;
+esac
 
 # Keep this vault: the next two cases build on it.
 FIRST_VAULT="$VAULT"; FIRST_HOME="$HOME"
@@ -306,6 +315,7 @@ stub_gh "$BIN" yes PUBLIC
 run --create-remote
 check_exit 1 "$rc"
 contains "$OUT" "is PUBLIC"
+contains "$LOG" "repo view you/vault"   # owner-qualified: a bare name resolves against a cwd remote
 log_lacks "$LOG" "repo create"
 
 # =========================================================================
@@ -319,6 +329,14 @@ contains "$OUT" "dataview 9.9.9 ←"
 json_is "$VAULT/.obsidian/plugins/dataview/manifest.json" '.version' '"9.9.9"' "the new version is on disk"
 json_is "$VAULT/.obsidian/plugins/dataview/.source.json" '.tag' '"9.9.9"' "the provenance is the new tag"
 contains "$VAULT/.obsidian/plugins/VERSIONS.md" "9.9.9"
+# VERSIONS.md and the manifests are tracked, so an upgrade leaves real changes to review —
+# but never a work-directory path, in the status or in the index.
+if git -C "$VAULT" status --porcelain | grep -q 'vault-setup\.'; then
+  bad "the work directory shows up in git status after --upgrade"
+else ok "no work directory in git status after --upgrade"; fi
+if git -C "$VAULT" ls-files | grep -q 'vault-setup\.'; then
+  bad "a work-directory file is tracked after --upgrade"
+else ok "nothing from the work directory is tracked after --upgrade"; fi
 CC_TEST_TAG=1.2.3
 
 # =========================================================================

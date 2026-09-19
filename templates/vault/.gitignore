@@ -9,3 +9,7 @@
 .obsidian/plugins/*/main.js
 .obsidian/plugins/*/styles.css
 .obsidian/plugins/*/*.js.map
+
+# `vault-setup` downloads into here and removes it before it stages anything. Belt for the run
+# that is killed halfway.
+.obsidian/.vault-setup.*/

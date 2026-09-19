@@ -120,6 +120,7 @@ ensure_gitignore() {
     echo ".obsidian/plugins/*/main.js"
     echo ".obsidian/plugins/*/styles.css"
     echo ".obsidian/plugins/*/*.js.map"
+    echo ".obsidian/.vault-setup.*/"
   } >> "$gi"
 }
 ensure_gitignore
@@ -323,6 +324,11 @@ write_json_if_absent "$vault/.obsidian/plugins/obsidian-git/data.json" \
   "Obsidian Git"
 
 # ---- first commit (a fresh vault only) ----------------------------------
+# The work directory is inside the vault, so it has to be gone before anything is staged: a
+# `git add -A` with it still there commits a temporary file and then deletes it, leaving junk in
+# the history and a dirty tree. Nothing below needs it.
+cleanup
+
 if [ "$fresh" -eq 1 ]; then
   step "first commit"
   if [ "$dry" -eq 1 ]; then
@@ -338,22 +344,28 @@ fi
 if [ "$create_remote" -eq 1 ]; then
   cc_need gh
   name="$(basename "$vault")"
-  step "gh repo create $name --private --source $vault --push"
-  vis="$(gh repo view "$name" --json visibility --jq .visibility 2>/dev/null || true)"
+  # Qualify the name with the account: a bare name resolves against the current directory's
+  # git remote, so `gh repo view vault` run inside the vault, or inside any other repo, can
+  # answer for somebody else's repository.
+  login="$(gh api user --jq .login 2>/dev/null || true)"
+  [ -n "$login" ] || cc_die "$EX_FAIL" "could not read the logged-in GitHub account (gh auth login)"
+  slug="$login/$name"
+  step "gh repo create $slug --private --source $vault --push"
+  vis="$(gh repo view "$slug" --json visibility --jq .visibility 2>/dev/null || true)"
   case "$vis" in
     PUBLIC)
-      cc_die "$EX_FAIL" "a repo named '$name' already exists on GitHub and is PUBLIC. The vault is your notes — refusing to push it there. Rename one of the two" ;;
+      cc_die "$EX_FAIL" "$slug already exists on GitHub and is PUBLIC. The vault is your notes — refusing to push it there. Rename one of the two" ;;
     PRIVATE)
-      say "$name exists already and is private — pushing to it instead of creating it"
+      say "$slug exists already and is private — pushing to it instead of creating it"
       if [ "$dry" -eq 1 ]; then
         say "would add origin and push"
       else
         git -C "$vault" remote get-url origin >/dev/null 2>&1 ||
-          git -C "$vault" remote add origin "$(gh repo view "$name" --json sshUrl --jq .sshUrl)"
+          git -C "$vault" remote add origin "$(gh repo view "$slug" --json sshUrl --jq .sshUrl)"
         git -C "$vault" push -u origin HEAD
       fi ;;
     *)
-      do_ gh repo create "$name" --private --source "$vault" --remote origin --push ;;
+      do_ gh repo create "$slug" --private --source "$vault" --remote origin --push ;;
   esac
 fi
 

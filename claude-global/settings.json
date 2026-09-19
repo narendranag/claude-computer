@@ -70,8 +70,10 @@
       "Bash(archive-push:*)",
       "Bash(resources-sync:*)",
       "Bash(new-app:*)",
-      "Bash(vault-setup:*)",
-      "Bash(~/claude-computer/bin/vault-setup:*)"
+      "Bash(vault-setup --create-remote*)",
+      "Bash(vault-setup * --create-remote*)",
+      "Bash(~/claude-computer/bin/vault-setup --create-remote*)",
+      "Bash(~/claude-computer/bin/vault-setup * --create-remote*)"
     ],
     "deny": [
       "Bash(bw get:*)",
