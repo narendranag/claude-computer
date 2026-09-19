@@ -15,7 +15,7 @@ Before opening a pull request, run what CI runs:
 ```bash
 shellcheck bin/* lib/*.sh *.sh tests/*.sh .githooks/* claude-global/hooks/*.sh
 bash -n <each of those>
-./tests/install-dry-run.sh          # install.sh through thirteen simulated machines, on stubs
+./tests/install-dry-run.sh          # install.sh through twenty-two simulated machines, on stubs
 jq -e . claude-global/settings.json
 ruff check lib docs/diagrams
 ```
