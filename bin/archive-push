@@ -4,11 +4,14 @@
 # ~/archive is a staging area, not storage. Once pushed and verified, R2 holds the only copy.
 #
 # Usage:
-#   archive-push <path>... [--delete-local] [--dry-run]
+#   archive-push <path>... [--delete-local [--yes]] [--dry-run]
 #   archive-push --index-only
 #
 #   <path>          file or folder inside ~/archive (keeps its relative path in R2)
 #   --delete-local  after a verified upload, remove the local copy. Without it, nothing is deleted.
+#                   Asks before each deletion; there is no undo, R2 becomes the only copy.
+#   --yes           answer that question yes. Needed when there is no terminal to ask on
+#                   (a scheduled job); otherwise say yes yourself.
 #   --dry-run       show what would be uploaded
 #   --index-only    just rebuild ~/archive/INDEX.md from `rclone lsjson`
 #
@@ -21,10 +24,11 @@ sm_wants_help "$@"
 sm_need jq
 
 ARCHIVE="${SM_ARCHIVE:-$HOME/archive}"
-paths=(); delete=0; dry=0; index_only=0
+paths=(); delete=0; dry=0; index_only=0; assume_yes=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --delete-local) delete=1; shift ;;
+    --yes|-y) assume_yes=1; shift ;;
     --dry-run) dry=1; shift ;;
     --index-only) index_only=1; shift ;;
     -*) sm_usage >&2; exit "$EX_USAGE" ;;
@@ -97,8 +101,14 @@ for p in "${paths[@]}"; do
     rclone check --one-way --include "/$(basename "$abs")" "$(dirname "$abs")" "$dst" || sm_die "$EX_FAIL" "verify failed: $rel (local copy kept)"
   fi
   if [ "$delete" -eq 1 ]; then
-    rm -rf -- "$abs"
-    sm_info "verified; removed local $rel"
+    # After this there is one copy, in R2. sm_confirm answers no when there is no
+    # terminal, so an unattended run keeps the local copy unless --yes was passed.
+    if [ "$assume_yes" -eq 1 ] || sm_confirm "delete the local copy of $rel? R2 will hold the only copy."; then
+      rm -rf -- "$abs"
+      sm_info "verified; removed local $rel"
+    else
+      sm_info "verified; local copy kept (not confirmed)"
+    fi
   else
     sm_info "verified; local copy kept (pass --delete-local to remove)"
   fi
