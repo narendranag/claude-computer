@@ -17,7 +17,7 @@
 # repo of that name is not a private instance (the template itself, or a public fork).
 set -euo pipefail
 
-VERSION="0.2.1"
+VERSION="0.3.0"
 TEMPLATE="${CC_INSTALL_TEMPLATE:-narendranag/claude-computer}"
 BREW_INSTALLER_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
 
