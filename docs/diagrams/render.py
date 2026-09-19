@@ -421,7 +421,7 @@ def draw_map(t: dict) -> str:
 # Diagram 2 — The build
 # ---------------------------------------------------------------------------
 
-PHASES = ["Accounts", "Four commands", "Handover", "Foundation", "Environment", "Folders & brains", "Workflows", "Close the loop"]
+PHASES = ["Accounts", "One command", "Handover", "Foundation", "Environment", "Folders & brains", "Workflows", "Close the loop"]
 # (step, phase, lane, label, rebuild) — lane: h human · c claude drives, human authenticates · a claude alone
 # rebuild: 1 repeated on every rebuild · 0.5 role-dependent · 0 first machine only
 STEPS = [
@@ -448,10 +448,11 @@ def draw_build(t: dict) -> str:
     n_rebuild = sum(1 for st in STEPS if st[4] == 1)
     s = SVG(W, H, t, "The build",
             f"The 38 installation steps in eight phases and three lanes: human only, Claude drives while the human "
-            f"authenticates, and Claude alone. The handover at step 14 is the pivot. {n_rebuild} steps are repeated "
-            f"when rebuilding a machine.")
+            f"authenticates, and Claude alone. Phase 1 is the one command the installer runs for you — steps 10 to 13, "
+            f"the four you would otherwise type by hand. The handover at step 14 is the pivot. {n_rebuild} steps are "
+            f"repeated when rebuilding a machine.")
     s.header("Diagram 2 · The build", "38 steps. From step 15, Claude drives.",
-             ["Before the handover you open accounts and type four commands. After it, you log in, grant and decide — nothing else.",
+             ["Before the handover you open accounts and paste one command — or type the four by hand. After it, you log in, grant and decide — nothing else.",
               f"Filled steps are what a second machine repeats: {n_rebuild} of 38."])
 
     gx, gy = 176, 206
@@ -479,7 +480,11 @@ def draw_build(t: dict) -> str:
         s.text(x + 12, gy + 18, f"{p}", 12, 700, t["faint"], mono=True)
         s.text(x + 28, gy + 18, name, 12.5, 650, t["ink"])
         count = sum(1 for st in STEPS if st[1] == p)
-        s.text(x + 12, gy + 34, f"{count} step{'s' if count > 1 else ''}", 11, 400, t["muted"])
+        label = f"{count} step{'s' if count > 1 else ''}"
+        # Phase 1 is four steps whatever happens — the installer performs them, or you type them.
+        if p == 1:
+            label += " · or by hand"
+        s.text(x + 12, gy + 34, label, 11, 400, t["muted"])
 
     # lanes
     for code, key, name, sub in LANES:
@@ -713,35 +718,46 @@ def draw_forms(t: dict) -> str:
 def draw_hero(t: dict) -> str:
     W, H = 1280, 420
     s = SVG(W, H, t, "Install the operator first",
-            "A terminal with the four commands a human types — Xcode command line tools, Homebrew, GitHub CLI, Claude "
-            "Code — beside the list of what Claude Code then sets up: machine map, keys, Tailscale, Bitwarden, "
-            "hooks, Brewfiles, brains, workflows.")
+            "A terminal with the one command a human pastes — the installer one-liner, which puts the Xcode command "
+            "line tools, Homebrew, the GitHub CLI and Claude Code on the machine and creates their private copy of "
+            "the template — and then the handover: cd into that copy, start Claude Code, paste the first prompt. "
+            "Beside it, the list of what Claude Code then sets up: machine map, keys, Tailscale, Bitwarden, hooks, "
+            "Brewfiles, brains, workflows. The four commands can still be typed by hand.")
     s.text(48, 78, "ai-first machine setup", 12, 700, t["accent"], ls="0.16em", upper=True)
     s.text(46, 136, "Install the", 48, 700, ls="-0.02em")
     s.text(46, 188, "operator first.", 48, 700, ls="-0.02em")
-    for i, ln in enumerate(["Type four commands. Claude Code sets up and", "runs everything else on your machines."]):
-        s.text(48, 232 + i * 25, ln, 17.5, 400, t["muted"])
+    for i, ln in enumerate(["Paste one command. Claude Code sets up and", "runs everything else on your machines."]):
+        s.text(48, 228 + i * 25, ln, 17.5, 400, t["muted"])
+    s.text(48, 274, "or type the four by hand", 13.5, 400, t["faint"])
     for i, (lab, key) in enumerate([("you authenticate", "human"), ("you set the mode", "hand"), ("you decide", "claude")]):
         x = 48 + i * 158
         s.rect(x, 300, 148, 34, r=17, fill=t[key], opacity=t["tint"] + 0.04, stroke=t[key], sw=1.2)
         s.text(x + 74, 322, lab, 13.5, 650, t[key], "middle")
     s.text(48, 366, "The human's three jobs. The rest is scripts, hooks and conversation.", 13, 500, t["faint"])
 
-    tx, ty, tw, th = 548, 48, 352, 324
+    tx, ty, tw, th = 536, 48, 392, 324
     term_bg = "#15151A" if t is LIGHT else "#0C0C0F"
     card(s, tx, ty, tw, th, fill=term_bg, stroke="#2A2A31")
     for i, c in enumerate(["#FF5F57", "#FEBC2E", "#28C840"]):
         s.add(f'<circle cx="{tx + 20 + i * 16}" cy="{ty + 19}" r="5" fill="{c}"/>')
     s.text(tx + tw / 2, ty + 23, "Terminal.app", 11, 600, "#8A8790", "middle")
-    lines = [("1", "$", "xcode-select --install"), ("2", "#", "Homebrew: the one-liner on brew.sh"),
-             ("3", "$", "brew install gh"), ("", "$", "gh auth login"),
-             ("4", "$", "brew install --cask claude-code"), ("", "$", "claude")]
-    for i, (n, p, c) in enumerate(lines):
-        y = ty + 70 + i * 34
+    # The installer is one command, and a long one: it is broken after `-c` with a shell
+    # continuation, which is how it would wrap in a terminal this wide anyway.
+    # (step, gutter number, prompt, text, extra indent, dy from the top of the block)
+    lines = [
+        ("1", "$", '/bin/bash -c "$(curl -fsSL \\', 0, 0),
+        ("", "", 'https://claude-computer.com/install.sh)"', 20, 24),
+        ("", "#", "Xcode CLT · Homebrew · gh · Claude Code", 0, 60),
+        ("", "#", "your private copy · the first prompt copied", 0, 82),
+        ("2", "$", "cd ~/claude-computer && claude", 0, 128),
+        ("", "#", "log in, then check auto mode is on", 0, 150),
+    ]
+    for n, p, c, indent, dy in lines:
+        y = ty + 74 + dy
         if n:
             s.text(tx + 20, y, n, 11, 700, "#5F5C66", mono=True)
         col = "#8A8790" if p == "#" else "#EDEBE6"
-        s.text(tx + 40, y, f"{p} {c}", 12.5, 500, col, mono=True)
+        s.text(tx + 40 + indent, y, f"{p} {c}".strip(), 12, 500, col, mono=True)
     s.rect(tx + 18, ty + th - 46, tw - 36, 28, r=7, fill="#24242B")
     s.text(tx + 32, ty + th - 27, "› paste docs/FIRST-PROMPT.md", 12.5, 600, "#7EE0C3", mono=True)
 

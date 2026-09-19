@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/hero-dark.svg">
-  <img alt="Install the operator first. Four commands in Terminal, then Claude Code sets up the rest: the machine map, SSH key, tailnet, Bitwarden, hooks, Brewfiles, brains and the daily loop." src="docs/diagrams/hero.svg" width="100%">
+  <img alt="Install the operator first. One command pasted into Terminal — the install.sh one-liner — then cd into your copy and start Claude Code, which sets up the rest: the machine map, SSH key, tailnet, Bitwarden, hooks, Brewfiles, brains and the daily loop. The four commands can still be typed by hand." src="docs/diagrams/hero.svg" width="100%">
 </picture>
 
 # claude-computer
@@ -117,14 +117,14 @@ The home directory gets a handful of top-level folders that sit beside the macOS
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/build-dark.svg">
-  <img alt="Swimlane diagram of the 38 installation steps across eight phases and three lanes: human only, Claude drives while the human authenticates, and Claude alone. The handover at step 14 is the pivot; after it the human lane holds only logins. Fifteen steps are highlighted as the rebuild subset." src="docs/diagrams/build.svg" width="100%">
+  <img alt="Swimlane diagram of the 38 installation steps across eight phases and three lanes: human only, Claude drives while the human authenticates, and Claude alone. Phase 1 is one command — steps 10 to 13, which the installer runs for you, or you type by hand. The handover at step 14 is the pivot; after it the human lane holds only logins. Fifteen steps are highlighted as the rebuild subset." src="docs/diagrams/build.svg" width="100%">
 </picture>
 
 Thirty-eight steps in eight phases. The shape matters more than the count: **everything before step 14 is yours, and after it you only log in.**
 
 **Phase 0 — Accounts** (browser, before you touch the machine). Claude Max subscription, GitHub, Tailscale (sign in with GitHub), Bitwarden, Cloudflare with a spend alert, keys for the research services, PostHog, and a Telegram bot. Accounts come first because every later step that needs a login stalls without one — and Bitwarden comes fourth so no key is ever written anywhere else.
 
-**Phase 1 — Four commands** in stock Terminal.app — the by-hand path, and what [`install.sh`](install.sh) runs for you, checking each one first (see the [Quick start](#quick-start)):
+**Phase 1 — One command**, or these four in stock Terminal.app — the by-hand path, and what [`install.sh`](install.sh) runs for you, checking each one first (see the [Quick start](#quick-start)):
 
 ```bash
 xcode-select --install
