@@ -104,7 +104,7 @@ CC_INSTALL_TEMPLATE=you/your-fork /bin/bash -c "$(curl -fsSL https://claude-comp
 
 ## The equivalent by hand
 
-The script exists to save you these, not to hide them. This is the same install, and it is what the README's Quick start has always said:
+The script exists to save you these, not to hide them. This is the same install, and it is the by-hand path the README keeps in [The build](../README.md#the-build):
 
 ```bash
 xcode-select --install

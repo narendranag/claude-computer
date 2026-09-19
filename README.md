@@ -5,46 +5,60 @@
 
 # claude-computer
 
-_An opinionated version of what an AI-first Mac and dev workflow looks like._
+by [Narendra Nag](https://narendranag.com)
 
-[claude-computer.com](https://claude-computer.com)
+_A Claude-first Mac setup for a solo developer._
+
+[claude-computer.com](https://claude-computer.com) · [What's inside](https://claude-computer.com/whats-inside/) — everything it installs, the services, folders, scripts and process on one page.
+
+A GitHub template that sets up a Mac for a solo developer. It assumes you have a Claude Max subscription and like terminal-first development in Claude Code — you step in for the key decisions, judgement and taste. Mac + Claude is the best combination IMO. The point is to get things done FAST, by cutting the time you spend on cruft.
+
+It's part stack (Claude + Tailscale + GitHub + Bitwarden + Cloudflare + Homebrew), part organization (an opinionated take on folders and repos), part process (slash commands, hooks, scheduled jobs) — all designed to take advantage of the Mac + Claude combination.
+
+I built this after spending a year arriving at a stack, pattern and process that has let me up my output exponentially. It is opinionated and reflects my learnings, taste and judgement. Change what doesn't fit. This repo is two things at once: the note that explains the approach, and the skeleton you clone to adopt it.
 
 ## Quick start
 
-You need a Mac on a recent macOS — recent enough that Homebrew still supports it, which in practice means one of the last three releases — a GitHub account, and a Claude plan that includes Claude Code (Pro or Max). Apple silicon or Intel both work; the only thing gated on the chip is the MacParakeet cask (Apple silicon, macOS 14+), which the Brewfile skips on Intel, taking the dictation and transcript pipeline with it. Everything else can be added as you go — the [full checklist](#get-started) lists the accounts worth opening first.
+You need a Mac on a recent macOS — recent enough that Homebrew still supports it, which in practice means one of the last three releases — a GitHub account, and a Claude Max subscription. All-day sessions in auto mode are the whole point, and they outrun anything smaller. Apple silicon or Intel both work; the only thing gated on the chip is the MacParakeet cask (Apple silicon, macOS 14+), which the Brewfile skips on Intel, taking the dictation and transcript pipeline with it. Everything else can be added as you go — the [full checklist](#get-started) lists the accounts worth opening first.
 
-1. **Install the operator** — four commands in Terminal.app:
+1. **Install the operator** — one line in stock Terminal.app:
 
    ```bash
-   xcode-select --install
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   brew install gh && gh auth login
-   brew install --cask claude-code
+   /bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)"
    ```
 
-   The Homebrew installer finishes by printing two `eval "$(… shellenv)"` lines. **Run them.** Until you do, `brew` isn't on your `PATH` and the third command fails with `command not found`.
+   It installs Xcode's Command Line Tools, Homebrew, `gh` and Claude Code, skipping whatever you already have; creates your private copy of this template at `~/claude-computer`; and puts the first prompt on your clipboard. **You type every password and do every login** — it never reads, writes or asks for a credential.
 
-2. **Create your private copy** of this template and open Claude Code in it:
+   Read it before you run it — it is a shell script from the internet, and the whole premise here is that you stay the one who decides:
 
    ```bash
-   cd ~ && gh repo create claude-computer --template narendranag/claude-computer --private --clone
+   curl -fsSL https://claude-computer.com/install.sh | less
+   ```
+
+   And see exactly what it would do, changing nothing:
+
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --dry-run
+   ```
+
+   [`docs/INSTALL.md`](docs/INSTALL.md) has the flags, the exit codes and the same install by hand — the four commands in [The build](#the-build), then one `gh repo create`.
+
+2. **Hand over** — open Claude Code in your copy:
+
+   ```bash
    cd ~/claude-computer && claude
    ```
 
-   No `--template` (an older `gh`, or a mirror)? Clone and repoint instead: `git clone https://github.com/narendranag/claude-computer.git ~/claude-computer`, then create an empty private repo of your own and `git remote set-url origin <your repo>`.
-
-3. **Hand over** — log in to Claude Code, check the status line shows auto mode, and paste the prompt from [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). From there you log in, grant permissions and decide; Claude does the rest.
+   Log in, check the status line reads **⏵⏵ auto mode on**, and paste the first prompt — it is already on your clipboard, and it is also [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). From there you log in, grant permissions and decide; Claude does the rest.
 
 **A template for getting Claude to run a fleet of machines you own, be your developer, your personal assistant and more.**
 
-I've spent the last year increasing how often, where, and how I use Claude. Today, I spend 90% of my time in Claude Code and in the terminal. I have a private LLM (Qwen) running on a Mac Studio, a laptop as a daily driver, and a Pi as my media center — all set up, managed and run by Claude. I decided to codify my approach to infrastructure (GitHub + Cloudflare), work (terminal-first, CLI script over app/prompt, AI-native but not MCP-first), organization (folder structure matters), dev patterns (git-based, dev stack, free), productivity tools (MacParakeet, Obsidian), and more (photography, writing, etc.) and make it available to anyone. There are many hard-earned lessons here: I went down the path of naming Claude (Jeeves, in my case), getting it to hire sub-agents and similar YouTube-friendly productivity hacks almost a year ago. This is where I've landed — it's fast, it works, and it's Claude-first (sorry ChatGPT). And now, it's yours to do with as you please.
-
-This repo is two things at once: the note that explains the approach, and the skeleton you clone to adopt it.
+I've spent the last year increasing how often, where, and how I use Claude. Today, I spend 90% of my time in Claude Code and in the terminal. I have a laptop as a daily driver, a private LLM (Qwen) running on a Mac Studio, a Mac Mini, a Hetzner VPS managed entirely by Claude, and a Pi as my media center — all set up, managed and run by Claude. I decided to codify my approach to infrastructure (GitHub + Cloudflare), work (terminal-first, CLI script over app/prompt, AI-native but not MCP-first), organization (folder structure matters), dev patterns (git-based, dev stack, free), productivity tools (MacParakeet, Obsidian), and more (photography, writing, etc.) and make it available to anyone. There are many hard-earned lessons here: I went down the path of naming Claude (Jeeves, in my case), getting it to hire sub-agents and similar YouTube-friendly productivity hacks almost a year ago. This is where I've landed — it's fast, it works, and it's Claude-first (sorry ChatGPT). And now, it's yours to do with as you please.
 
 > [!NOTE]
 > Everything here is opinionated on purpose. It is one working setup, written down so a machine can follow it. Where I chose, the reason is in [`docs/TEMPLATE-DECISIONS.md`](docs/TEMPLATE-DECISIONS.md); change what doesn't fit and record why in your own `docs/DECISIONS.md`.
 
-**Contents** · [Quick start](#quick-start) · [The idea](#the-idea) · [The map](#the-map) · [The build](#the-build) · [The brain](#the-brain) · [Trust](#trust) · [Tools](#tools) · [The second brain](#the-second-brain) · [Workflows](#workflows) · [What I'd tell my past self](#what-id-tell-my-past-self) · [Get started](#get-started)
+**Contents** · [Quick start](#quick-start) · [The idea](#the-idea) · [The map](#the-map) · [The build](#the-build) · [The brain](#the-brain) · [Trust](#trust) · [Tools](#tools) · [The second brain](#the-second-brain) · [Workflows](#workflows) · [What I'd tell my past self](#what-id-tell-my-past-self) · [Get started](#get-started) · [Who's behind this](#whos-behind-this)
 
 ---
 
@@ -52,7 +66,7 @@ This repo is two things at once: the note that explains the approach, and the sk
 
 The usual order is: set up the machine, install your tools, then maybe add an AI assistant to help you code. I do it the other way round. **The first thing on a new Mac is the operator.** Xcode's command line tools, Homebrew, the GitHub CLI and Claude Code — and then I hand it the machine.
 
-From that point, anything I would once have taken to an IT help desk goes to Claude: install this, configure that, why is this port open, set up the new box in the cupboard, archive last year's projects, rotate this key. Not ordinary app use — system changes and bulk work.
+All the things a solo dev ends up losing an afternoon to — install this, configure that, why is this port open, set up the new box in the cupboard, rotate this key — go to Claude instead. Not ordinary app use — system changes and bulk work.
 
 The human keeps three jobs:
 
@@ -110,9 +124,9 @@ The home directory gets a handful of top-level folders that sit beside the macOS
 
 Thirty-eight steps in eight phases. The shape matters more than the count: **everything before step 14 is yours, and after it you only log in.**
 
-**Phase 0 — Accounts** (browser, before you touch the machine). Claude subscription, GitHub, Tailscale (sign in with GitHub), Bitwarden, Cloudflare with a spend alert, keys for the research services, PostHog, and a Telegram bot. Accounts come first because every later step that needs a login stalls without one — and Bitwarden comes fourth so no key is ever written anywhere else.
+**Phase 0 — Accounts** (browser, before you touch the machine). Claude Max subscription, GitHub, Tailscale (sign in with GitHub), Bitwarden, Cloudflare with a spend alert, keys for the research services, PostHog, and a Telegram bot. Accounts come first because every later step that needs a login stalls without one — and Bitwarden comes fourth so no key is ever written anywhere else.
 
-**Phase 1 — Four commands** in stock Terminal.app:
+**Phase 1 — Four commands** in stock Terminal.app — the by-hand path, and what [`install.sh`](install.sh) runs for you, checking each one first (see the [Quick start](#quick-start)):
 
 ```bash
 xcode-select --install
@@ -320,7 +334,7 @@ vault/
 
 **1. Phase 0 checklist** — in a browser, before touching the machine:
 
-- [ ] Claude subscription that includes Claude Code — Pro, or Max (5× or 20× Pro usage). All-day sessions in auto mode outrun Pro quickly; I use Max.
+- [ ] A Claude Max subscription. All-day sessions in auto mode are the whole point, and they outrun anything smaller.
 - [ ] GitHub account (use it as your login everywhere it's offered)
 - [ ] Tailscale, signed in with GitHub
 - [ ] Bitwarden — every key from here on goes straight into an item
@@ -330,18 +344,29 @@ vault/
 - [ ] Telegram: `/newbot` with @BotFather → token and chat id → Bitwarden
 - [ ] _Later:_ Google Cloud OAuth client for Gmail, Calendar and Drive ([how](docs/SECRETS.md#getting-each-value))
 
-**2. The four commands** in Terminal.app — see [The build](#the-build).
+**2. Install the operator and create your instance** — one line in Terminal.app:
 
-**3. Create your instance and hand over:**
+```bash
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)"
+```
+
+It installs Xcode's Command Line Tools, Homebrew, `gh` and Claude Code, skipping what you already have, creates your private copy at `~/claude-computer`, and puts the first prompt on your clipboard. You type every password and do every login. Read it first with `curl -fsSL https://claude-computer.com/install.sh | less`, or see what it would do with `… -- --dry-run`. Flags and exit codes: [`docs/INSTALL.md`](docs/INSTALL.md).
+
+By hand instead: the four commands in [The build](#the-build), then
 
 ```bash
 cd ~ && gh repo create claude-computer --template narendranag/claude-computer --private --clone
+```
+
+Without `--template` (an older `gh`, or a mirror): `git clone https://github.com/narendranag/claude-computer.git ~/claude-computer`, then create an empty private repo of your own and point `origin` at it.
+
+**3. Hand over:**
+
+```bash
 cd ~/claude-computer && claude
 ```
 
-Without `--template`: `git clone https://github.com/narendranag/claude-computer.git ~/claude-computer`, then point `origin` at a private repo of your own.
-
-Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). Then do what it asks: log in, grant, decide.
+Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md) — the installer already put it on your clipboard. Then do what it asks: log in, grant, decide.
 
 <details>
 <summary><b>What's in the box</b></summary>
@@ -363,6 +388,10 @@ Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md). Then do what it asks: log 
 **Contributing.** Mostly you shouldn't have to — fork it and make it yours. But if you have made something general work (another camera, Linux, a tool that does what Bitwarden or R2 does here), [`CONTRIBUTING.md`](CONTRIBUTING.md) says how. Security problems go through a private advisory, never a public issue: [`SECURITY.md`](SECURITY.md).
 
 **Keeping up with the template.** Your instance keeps this repo as an `upstream` remote, fetch-only. Pull improvements when you choose. When you learn something worth sharing, `/upstream` rewrites it generically and opens a pull request here — never a push from your private instance.
+
+## Who's behind this
+
+I'm Narendra. Twenty-eight years at the intersection of journalism, digital and streaming, and I now run [Marain](https://marain.space), an operator's practice — most advisors leave a deck, I leave a system that runs. I write about media, attention and the industries that shape how we spend it at [narendranag.com](https://narendranag.com). For the last year I've spent 90% of my time in Claude Code and the terminal, with a laptop, a Mac Studio running Qwen, a Mac Mini, a Hetzner VPS (managed entirely by Claude) and a Pi — all set up and run by Claude. This template is that setup, written down.
 
 ## Fork it for another agent
 
