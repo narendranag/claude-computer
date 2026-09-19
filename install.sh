@@ -200,10 +200,23 @@ find_brew() {
   command -v brew 2>/dev/null || return 1
 }
 
-# A stale developer directory after an OS upgrade leaves `xcode-select -p` answering while
-# git and clang are broken, so all three have to work before we call this done.
+# /usr/bin/git, /usr/bin/clang and /usr/bin/python3 are not those programs on a Mac without
+# the Command Line Tools: they are one small shim binary, and *invoking* any of them pops the
+# "install developer tools" GUI dialog. Nothing may execute one before step 1 has finished —
+# not even under --dry-run, which promises to change nothing and ask nothing.
+#
+# So this probe is filesystem-first. A stale developer directory after an OS upgrade leaves
+# `xcode-select -p` answering while the tools underneath are gone, which is the case the
+# three-way check exists for; looking for the real binaries on disk catches it without
+# running the shim. Only once they are there is it safe to execute git and clang, because by
+# then /usr/bin/git forwards to a real one instead of opening the installer.
 clt_ok() {
-  xcode-select -p >/dev/null 2>&1 || return 1
+  local p
+  p="$(xcode-select -p 2>/dev/null)" || return 1
+  [ -n "$p" ] || return 1
+  [ -d "$p" ] || return 1
+  [ -x "$p/usr/bin/git" ] || return 1
+  [ -x "$p/usr/bin/clang" ] || return 1
   git --version >/dev/null 2>&1 || return 1
   clang --version >/dev/null 2>&1 || return 1
   return 0
@@ -360,14 +373,36 @@ else
   will "Claude Code (brew install --cask claude-code)"
 fi
 
-GIT_NAME="$(git config --global user.name 2>/dev/null || true)"
-GIT_EMAIL="$(git config --global user.email 2>/dev/null || true)"
-if [ -n "$GIT_NAME" ] && [ -n "$GIT_EMAIL" ]; then
-  have "git identity: $GIT_NAME <$GIT_EMAIL>"
-else
-  # A warning, not a blocker: /setup asks for these, and nothing before then needs a commit.
-  needs_you "git has no global user.name/user.email — /setup will ask you for them later"
-fi
+# Reading the git identity means running git, which before step 1 is the shim. A warning
+# either way: /setup asks for these, and nothing before then makes a commit.
+report_git_identity() {
+  local n e
+  if ! clt_ok; then
+    needs_you "git identity — checked once the Command Line Tools are in; /setup asks for it either way"
+    return 0
+  fi
+  n="$(git config --global user.name 2>/dev/null || true)"
+  e="$(git config --global user.email 2>/dev/null || true)"
+  if [ -n "$n" ] && [ -n "$e" ]; then
+    have "git identity: $n <$e>"
+  else
+    needs_you "git has no global user.name/user.email — /setup will ask you for them later"
+  fi
+}
+report_git_identity
+
+# A clone of our own repo with no CLAUDE.md in it is the wreckage of a run that gave up
+# while GitHub was still copying the template. It is resumable, not an obstruction, so it
+# must not be mistaken for someone else's directory and refused with exit 4.
+#
+# The origin is read out of .git/config with grep rather than `git remote get-url`, because
+# this runs before step 1, where git is the shim. Nothing here executes git.
+unfinished_clone() {
+  [ -d "$DIR/.git" ] || return 1
+  [ -f "$DIR/CLAUDE.md" ] && return 1
+  [ -f "$DIR/.git/config" ] || return 1
+  grep -qE "url *=.*[/:]$NAME(\.git)?\$" "$DIR/.git/config" 2>/dev/null
+}
 
 # The destination, and whether a repo of that name already exists on the account.
 # "existing remote, no local clone" is exactly the documented second-machine path.
@@ -376,6 +411,9 @@ if [ -e "$DIR" ]; then
   if [ -d "$DIR/.git" ] && [ -f "$DIR/CLAUDE.md" ]; then
     DIR_STATE="clone"
     have "$DIR is already a claude-computer clone — leaving it as it is"
+  elif unfinished_clone; then
+    DIR_STATE="unfinished"
+    will "$DIR is a clone of $NAME that GitHub had not finished filling — resuming it"
   elif [ -d "$DIR" ] && [ -z "$(ls -A "$DIR" 2>/dev/null)" ]; then
     DIR_STATE="empty"
     will "$DIR exists but is empty — cloning into it"
@@ -384,15 +422,19 @@ if [ -e "$DIR" ]; then
   fi
 fi
 
+# Always owner-qualified once the account is known: a bare `gh repo view <name>` run from
+# inside some other git repo can resolve against that repo's remote rather than the account.
+REPO_SLUG="$NAME"
+gh_repo_exists() {
+  if [ -n "$GH_ACCOUNT" ]; then REPO_SLUG="$GH_ACCOUNT/$NAME"; fi
+  gh repo view "$REPO_SLUG" >/dev/null 2>&1
+}
+
 REMOTE_STATE="unknown"
 if [ "$PUBLIC_CLONE" -eq 1 ]; then
   REMOTE_STATE="skipped"
 elif [ "$DO_GH_AUTH" -eq 0 ] && command -v gh >/dev/null 2>&1; then
-  if gh repo view "$NAME" >/dev/null 2>&1; then
-    REMOTE_STATE="exists"
-  else
-    REMOTE_STATE="absent"
-  fi
+  if gh_repo_exists; then REMOTE_STATE="exists"; else REMOTE_STATE="absent"; fi
 fi
 
 head2 "Your copy"
@@ -400,6 +442,8 @@ if [ "$PUBLIC_CLONE" -eq 1 ]; then
   will "read-only clone of $TEMPLATE into $DIR (--public-clone: no repo of your own)"
 elif [ "$DIR_STATE" = "clone" ]; then
   have "nothing to create — $DIR is already there"
+elif [ "$DIR_STATE" = "unfinished" ]; then
+  will "the half-filled clone at $DIR finished off — no new repo is created"
 elif [ "$DIR_STATE" = "occupied" ]; then
   err "$DIR already exists and is not a claude-computer clone."
   say "Move it aside, or pass --dir <somewhere else>, and run this again."
@@ -532,7 +576,7 @@ if [ "$DO_GH_AUTH" -eq 1 ]; then
     GH_ACCOUNT="$(gh api user --jq .login 2>/dev/null || true)"
     # Now that we can ask, settle the question preflight had to leave open.
     if [ "$PUBLIC_CLONE" -eq 0 ] && [ "$REMOTE_STATE" = "unknown" ]; then
-      if gh repo view "$NAME" >/dev/null 2>&1; then REMOTE_STATE="exists"; else REMOTE_STATE="absent"; fi
+      if gh_repo_exists; then REMOTE_STATE="exists"; else REMOTE_STATE="absent"; fi
     fi
   fi
 else
@@ -559,16 +603,54 @@ head2 "5/5 Your copy of the template"
 # is required to.
 WANT_TEMPLATE_MARK=1
 
+# `gh repo create --template` returns before GitHub has finished copying the template into
+# the new repo, so a clone issued straight afterwards can come back empty — "You appear to
+# have cloned an empty repository". gh's own --clone flag retries internally; since we clone
+# separately so that --dir can point anywhere, we have to do the waiting ourselves.
+#
+# An empty clone has origin set and an unborn branch, so `pull --ff-only` fails on it with
+# no upstream. Fetch first, work out the default branch from origin/HEAD, and check it out.
+# Everything is best-effort: whether CLAUDE.md turned up is the only real answer.
+wait_for_template_copy() {
+  local waited=0 br=""
+  if [ -f "$DIR/CLAUDE.md" ]; then return 0; fi
+  say "  Waiting for GitHub to finish copying the template…"
+  while [ "$waited" -lt 60 ]; do
+    sleep 5
+    waited=$((waited + 5))
+    git -C "$DIR" fetch --quiet origin >/dev/null 2>&1 || true
+    br="$(git -C "$DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    br="${br#origin/}"
+    if [ -z "$br" ]; then
+      br="$(git -C "$DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    fi
+    [ -n "$br" ] || br="main"
+    git -C "$DIR" checkout --quiet -B "$br" "origin/$br" >/dev/null 2>&1 ||
+      git -C "$DIR" pull --ff-only --quiet >/dev/null 2>&1 || true
+    if [ -f "$DIR/CLAUDE.md" ]; then
+      say "  ${C_G}✓${C_0} the copy arrived (after ${waited}s)"
+      return 0
+    fi
+  done
+  return 1
+}
+
+NEED_WAIT=0
+
 if [ "$DIR_STATE" = "clone" ]; then
   info "  $DIR is already there — skipping"
   WANT_TEMPLATE_MARK=0
+elif [ "$DIR_STATE" = "unfinished" ]; then
+  say "  Finishing the clone at $DIR that the last run left half-filled."
+  WANT_TEMPLATE_MARK=0
+  NEED_WAIT=1
 elif [ "$PUBLIC_CLONE" -eq 1 ]; then
   say "  Read-only clone of $TEMPLATE. Nothing is created on your account."
   run git clone "https://github.com/$TEMPLATE.git" "$DIR"
 elif [ "$REMOTE_STATE" = "exists" ]; then
   say "  $NAME already exists on your account — cloning it rather than creating a second one."
   say "  (This is the second-machine path: the repo already knows your fleet.)"
-  run gh repo clone "$NAME" "$DIR"
+  run gh repo clone "$REPO_SLUG" "$DIR"
   WANT_TEMPLATE_MARK=0
 else
   say "  Creating a private $NAME from $TEMPLATE, then cloning it to $DIR."
@@ -577,6 +659,18 @@ else
   # and not just at ./<name> in the current directory.
   run gh repo create "$NAME" --template "$TEMPLATE" --private
   run gh repo clone "$NAME" "$DIR"
+  NEED_WAIT=1
+fi
+
+if [ "$NEED_WAIT" -eq 1 ]; then
+  if [ "$DRY" -eq 1 ]; then
+    show "# then poll the clone for up to 60s while GitHub copies the template"
+  elif ! wait_for_template_copy; then
+    err "GitHub has not finished copying the template into $NAME after 60 seconds."
+    say "Nothing is broken and re-running is safe: the repo exists now, so the next run takes"
+    say "the 'already exists → clone' path and picks up the half-filled clone at $DIR."
+    exit 1
+  fi
 fi
 
 if [ "$DRY" -eq 0 ]; then
