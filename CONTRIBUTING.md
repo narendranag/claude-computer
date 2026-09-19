@@ -10,12 +10,14 @@ git config core.hooksPath .githooks   # gitleaks scans every commit; commits fai
 brew install gitleaks shellcheck jq   # the three the checks need
 ```
 
+**Your fork is not an instance.** It is public, and it is called `<you>/claude-computer`, which is the name the installer would otherwise use — so it refuses it, and it is right to: an instance holds a map of your machines. If you want to run this for real as well as work on it, create a separate private instance with any other name, at the usual path: `… -- --name sys-admin --dir ~/claude-computer` (the installer asks for the name if you leave `--name` off). To read the template without creating anything, `--public-clone`. [`docs/INSTALL.md`](docs/INSTALL.md#one-repo-for-the-whole-fleet) has the rest.
+
 Before opening a pull request, run what CI runs:
 
 ```bash
 shellcheck bin/* lib/*.sh *.sh tests/*.sh .githooks/* claude-global/hooks/*.sh
 bash -n <each of those>
-./tests/install-dry-run.sh          # install.sh through twenty-two simulated machines, on stubs
+./tests/install-dry-run.sh          # install.sh through thirty-seven simulated machines, on stubs
 ./tests/vault-setup.sh              # vault-setup through eight, on stubbed curl and gh
 jq -e . claude-global/settings.json
 ruff check lib docs/diagrams
