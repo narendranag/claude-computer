@@ -53,10 +53,8 @@ You need a Mac on a recent macOS — recent enough that Homebrew still supports 
 
 **A template for getting Claude to run a fleet of machines you own, be your developer, your personal assistant and more.**
 
-I've spent the last year increasing how often, where, and how I use Claude. Today, I spend 90% of my time in Claude Code and in the terminal. I have a laptop as a daily driver, a private LLM (Qwen) running on a Mac Studio, a Mac Mini, a Hetzner VPS managed entirely by Claude, and a Pi as my media center — all set up, managed and run by Claude. I decided to codify my approach to infrastructure (GitHub + Cloudflare), work (terminal-first, CLI script over app/prompt, AI-native but not MCP-first), organization (folder structure matters), dev patterns (git-based, dev stack, free), productivity tools (MacParakeet, Obsidian), and more (photography, writing, etc.) and make it available to anyone. There are many hard-earned lessons here: I went down the path of naming Claude (Jeeves, in my case), getting it to hire sub-agents and similar YouTube-friendly productivity hacks almost a year ago. This is where I've landed — it's fast, it works, and it's Claude-first (sorry ChatGPT). And now, it's yours to do with as you please.
-
 > [!NOTE]
-> Everything here is opinionated on purpose. It is one working setup, written down so a machine can follow it. Where I chose, the reason is in [`docs/TEMPLATE-DECISIONS.md`](docs/TEMPLATE-DECISIONS.md); change what doesn't fit and record why in your own `docs/DECISIONS.md`.
+> Where I chose, the reason is in [`docs/TEMPLATE-DECISIONS.md`](docs/TEMPLATE-DECISIONS.md). Record what you change, and why, in your own instance's `docs/DECISIONS.md`.
 
 **Contents** · [Quick start](#quick-start) · [The idea](#the-idea) · [The map](#the-map) · [The build](#the-build) · [The brain](#the-brain) · [Trust](#trust) · [Tools](#tools) · [The second brain](#the-second-brain) · [Workflows](#workflows) · [What I'd tell my past self](#what-id-tell-my-past-self) · [Get started](#get-started) · [Who's behind this](#whos-behind-this)
 
@@ -395,6 +393,8 @@ Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md) — the installer already p
 ## Who's behind this
 
 I'm Narendra. Twenty-eight years at the intersection of journalism, digital and streaming, and I now run [Marain](https://marain.space), an operator's practice — most advisors leave a deck, I leave a system that runs. I write about media, attention and the industries that shape how we spend it at [narendranag.com](https://narendranag.com). For the last year I've spent 90% of my time in Claude Code and the terminal, with a laptop, a Mac Studio running Qwen, a Mac Mini, a Hetzner VPS (managed entirely by Claude) and a Pi — all set up and run by Claude. This template is that setup, written down.
+
+I've spent the last year increasing how often, where, and how I use Claude. Today, I spend 90% of my time in Claude Code and in the terminal. I have a laptop as a daily driver, a private LLM (Qwen) running on a Mac Studio, a Mac Mini, a Hetzner VPS managed entirely by Claude, and a Pi as my media center — all set up, managed and run by Claude. I decided to codify my approach to infrastructure (GitHub + Cloudflare), work (terminal-first, CLI script over app/prompt, AI-native but not MCP-first), organization (folder structure matters), dev patterns (git-based, dev stack, free), productivity tools (MacParakeet, Obsidian), and more (photography, writing, etc.) and make it available to anyone. There are many hard-earned lessons here: I went down the path of naming Claude (Jeeves, in my case), getting it to hire sub-agents and similar YouTube-friendly productivity hacks almost a year ago. This is where I've landed — it's fast, it works, and it's Claude-first (sorry ChatGPT). And now, it's yours to do with as you please.
 
 ## Fork it for another agent
 
