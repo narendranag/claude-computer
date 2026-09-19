@@ -53,6 +53,8 @@ sm_wants_help() {
 # The session token is never written to a persistent plaintext file:
 #   macOS  → login Keychain (cleared by `secrets-unlock --lock`)
 #   Linux  → $XDG_RUNTIME_DIR (tmpfs, per-user, gone at logout), mode 600
+# The token is never an argument to any process: writes go through `security -i` (stdin),
+# reads come back on stdout. Only the item's service name is ever on a command line.
 
 readonly _SM_KC_SERVICE="system-manager-bw-session"
 
@@ -74,7 +76,14 @@ sm_session_load() {
 sm_session_store() {
   local s="$1"
   if sm_is_macos; then
-    security add-generic-password -U -a "$USER" -s "$_SM_KC_SERVICE" -w "$s" >/dev/null
+    # `security ... -w "$s"` would put the token in argv, where any process can read it
+    # with `ps` — the same rule that keeps keys off curl's command line. `security -i`
+    # reads its commands from stdin instead, so argv is just "security -i".
+    # printf is a shell builtin, so the token never becomes another process's argument.
+    local q="$s"
+    q="${q//\\/\\\\}"; q="${q//\"/\\\"}"   # the -i parser is quote-aware; escape what would end the string
+    printf 'add-generic-password -U -a "%s" -s "%s" -w "%s"\n' "$USER" "$_SM_KC_SERVICE" "$q" |
+      security -i >/dev/null
   else
     local f; f="$(_sm_runtime_file)"
     ( umask 077; printf '%s' "$s" > "$f" )
