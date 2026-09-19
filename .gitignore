@@ -37,6 +37,7 @@ INDEX.md
 !templates/**/INDEX.md
 *.log
 .claude/settings.local.json
+.claude/worktrees/
 
 # Tooling
 node_modules/

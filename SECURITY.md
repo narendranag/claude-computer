@@ -4,6 +4,8 @@
 
 **Do not open a public issue.** Report it privately through GitHub security advisories: go to the **Security** tab of this repository, choose **Report a vulnerability**, and fill in the form. That opens a private thread visible only to you and the maintainer.
 
+If you cannot use GitHub security advisories, email security@claude-computer.com instead.
+
 Useful things to include, as far as you know them:
 
 - what the problem is, and what an attacker gets out of it
