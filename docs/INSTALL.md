@@ -32,11 +32,90 @@ And you can see exactly what it would do, changing nothing:
 
 The pipe form would put the download on standard input, and standard input is where the Homebrew installer reads your password and where `gh auth login` reads your answers. With the script on stdin, both of them hang or fail. The `bash -c "$(…)"` form keeps your terminal attached.
 
-The script checks for this: a real run with no terminal on stdin prints the right form and exits 2 rather than starting something it cannot finish. `--dry-run`, `--help` and `--version` change nothing and ask nothing, so those do work down a pipe — `curl -fsSL https://claude-computer.com/install.sh | bash -s -- --dry-run` is fine, and it says so once.
+The script checks for this: a real run with no terminal on stdin prints the right form and exits 2 rather than starting something it cannot finish. `--dry-run`, `--help` and `--version` change nothing, so those do work down a pipe — `curl -fsSL https://claude-computer.com/install.sh | bash -s -- --dry-run` is fine, and it says so once. Down a pipe a dry run asks nothing at all; with a terminal it asks the one question below, which changes nothing either.
+
+## One repo for the whole fleet
+
+**Use the same name on every machine.** With no flags the installer asks you one question:
+
+```text
+  What should your private repo be called? It is ONE repo for every machine you own: use the same name on each.
+  Repo name [claude-computer]:
+```
+
+`--name` is the name of that GitHub repo, and the design is one private repo shared by the whole fleet. Every machine clones that same repo. That is what lets the laptop see and fix the Mini, keeps one `docs/FLEET.md`, and keeps one append-only `docs/DECISIONS.md`. Answer `mini-admin` on the Mini and `air-admin` on the Air and you get two separate brains that know nothing about each other — the "each machine keeps its own map" setup the [README](../README.md#what-id-tell-my-past-self) says fell apart.
+
+The default, `claude-computer`, is right for almost everyone: a private `<you>/claude-computer` cloned to `~/claude-computer`. You need another name in two cases — you want one, `sys-admin` say, or `<you>/claude-computer` is taken by something that is not your instance. The common version of the second is a **contributor who forked this template**: your fork is `<you>/claude-computer`, it is public, and a map of your machines must never go there. The installer checks and will not use it.
+
+### How it plays out
+
+**First machine.** Run the one-liner, answer the question, and it creates the private repo from the template:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)"
+```
+
+Scripted, or if you would rather not be asked — and this is the form to use on every machine after the first:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --name sys-admin --dir ~/claude-computer
+```
+
+**Every later machine.** The same command, the same answer. The installer sees that the private repo already exists and takes the second-machine path: it clones the repo instead of creating one, and says so.
+
+```text
+  → octocat/sys-admin already exists on GitHub — cloning it instead of creating it (this is the second-machine path)
+  ✓ it is private and not a template — an instance, as expected
+  same repo on every machine: this one will appear as docs/machines/mini.md
+```
+
+`/setup` then asks only what is specific to that machine. It does not offer to initialise a fresh instance: `.template` was deleted on the first machine, so a clone does not have it.
+
+### Where per-machine identity comes from
+
+**The hostname. The repo name plays no part.** [`CLAUDE.md`](../CLAUDE.md) has Claude run `scutil --get LocalHostName`, read or write `docs/machines/<host>.md`, and tag its commits `[<host>]`.
+
+So if you want machines to show up as `mini` and `air`, set those as the hostnames — the fleet files become `docs/machines/mini.md` and `docs/machines/air.md`. The unambiguous route is one command per machine, and it is yours to run because it needs `sudo`:
+
+```bash
+sudo scutil --set LocalHostName mini
+```
+
+The same name in the GUI lives in System Settings, under Sharing, as the local hostname; the exact wording moves between macOS releases, and the command above is the same thing without the hunt. Do it before `/setup`, or you will have a `docs/machines/Someones-MacBook-Pro.md` to rename. The installer says which file this machine will be, and warns when the hostname is one macOS made up.
+
+A name like `fleet` or `sys-admin` for the one shared repo fits this better than a per-machine name does.
+
+### Keep the directory the same everywhere too
+
+A different `--dir` per machine is possible and is a bad idea. The hooks in `claude-global/hooks/` default to `~/claude-computer` through `CC_HOME`, every permission rule in [`claude-global/settings.json`](../claude-global/settings.json) is written against `~/claude-computer/bin/…`, and `/setup` stops if `pwd` is anything else. A different path on one machine means rules that never match — and an _ask_ rule that does not match fails open, so the prompt you meant to get does not arrive — plus a `CC_HOME` you have to remember to export.
+
+The repo name does not move the directory: `--name sys-admin` alone still clones to `~/claude-computer`. Only an explicit `--dir` changes it.
+
+### If you get it wrong
+
+**Two repos, one per machine.** Pick the one to keep. Move the other's `docs/machines/<host>.md` across, add its row to `docs/FLEET.md` and its lines to `docs/DECISIONS.md`, then on that machine point the clone at the keeper and pull:
+
+```bash
+cd ~/claude-computer
+git remote set-url origin git@github.com:<you>/sys-admin.git
+git fetch origin && git reset --hard origin/main
+```
+
+The reset discards that clone's own history, which is why the machine file moves across first — the two repos are separate template copies and share no commits. Then archive or delete the repo you dropped (`gh repo archive <you>/air-admin`), so nobody clones it by accident later.
+
+**The clone is in the wrong directory.** Move it and re-link, rather than setting `CC_HOME` — the environment variable fixes the hooks and nothing else, and the permission rules and `/setup` still expect the path:
+
+```bash
+mv ~/sys-admin ~/claude-computer
+```
+
+Then relink `~/.claude` — `CLAUDE.md`, `settings.json`, `commands` and `hooks` all point into the old path — which is phase 4 of `/setup`; ask Claude to redo it. Check `map-check` runs afterwards.
 
 ## What it does, in order
 
 Before it changes anything it prints a checklist — `✓` what you have, `→` what it will install, `!` what needs you — and asks once whether to go ahead.
+
+**The question.** With no `--name` and a terminal, it asks what your private repo should be called before anything else, and prints `repo: <you>/<name> · directory: ~/claude-computer` so the two are never confused. `--yes`, `--name` and a run with no terminal skip it. See [One repo for the whole fleet](#one-repo-for-the-whole-fleet).
 
 **Preflight.** macOS only (a Linux box exits 3: headless machines are managed from a Mac over SSH, never set up this way). macOS version and chip — the MacParakeet dictation and transcript pipeline is Apple silicon only, and the Brewfile skips it on Intel. Whether `github.com` is reachable, whether there is enough disk, and whether you are an administrator, because Homebrew needs one. Then the state of each component, and the URLs it will fetch.
 
@@ -61,15 +140,15 @@ The script does not start Claude Code for you and passes no permission-mode flag
 
 ## Flags
 
-| Flag             | What it does                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------ |
-| `--dry-run`      | Print every command it would run. Changes nothing, asks nothing, writes nothing.     |
-| `--yes`          | Do not pause for confirmation.                                                       |
-| `--dir <path>`   | Where the clone goes. Default `$HOME/claude-computer`.                               |
-| `--name <repo>`  | The name of your private repo. Default `claude-computer`.                            |
-| `--public-clone` | Do not create a repo of your own: clone the template read-only, to look at it first. |
-| `--help`         | The usage text.                                                                      |
-| `--version`      | The version, then exit.                                                              |
+| Flag             | What it does                                                                                                                                                                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`      | Print every command it would run. Changes nothing and writes nothing. It asks only for the repo name, and only with a terminal and no `--name`.                                                                                          |
+| `--yes`          | Do not pause for confirmation, and do not ask for the repo name.                                                                                                                                                                         |
+| `--dir <path>`   | Where the clone goes. Default `$HOME/claude-computer` whatever `--name` says, because the hooks, the permission rules and `/setup` assume that path.                                                                                     |
+| `--name <repo>`  | The name of your private GitHub repo. Default `claude-computer`, and it is what the question asks for. One repo for the whole fleet: the same name on every machine — see [One repo for the whole fleet](#one-repo-for-the-whole-fleet). |
+| `--public-clone` | Do not create a repo of your own: clone the template read-only, to look at it first.                                                                                                                                                     |
+| `--help`         | The usage text.                                                                                                                                                                                                                          |
+| `--version`      | The version, then exit.                                                                                                                                                                                                                  |
 
 Flags go after a `--`, because of how `bash -c` assigns arguments — the first word after the script becomes `$0`, so the flags need a placeholder in front of them:
 
@@ -92,15 +171,15 @@ CC_INSTALL_TEMPLATE=you/your-fork /bin/bash -c "$(curl -fsSL https://claude-comp
 
 ## Exit codes
 
-| Code | Meaning                                                                                          |
-| ---- | ------------------------------------------------------------------------------------------------ |
-| 0    | Done, or you answered no at the prompt.                                                          |
-| 1    | A step failed. The message says which; re-running is safe.                                       |
-| 2    | Bad arguments, or a real run with no terminal on stdin.                                          |
-| 3    | Not macOS.                                                                                       |
-| 4    | Something that is not a `claude-computer` clone is already at the target directory.              |
-| 5    | The Command Line Tools installer did not finish within 30 minutes.                               |
-| 6    | The repo of that name is not a private instance: it is the template, a template repo, or public. |
+| Code | Meaning                                                                                                                                            |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Done, or you answered no at the prompt.                                                                                                            |
+| 1    | A step failed. The message says which; re-running is safe.                                                                                         |
+| 2    | Bad arguments, a real run with no terminal on stdin, or no usable repo name after three tries.                                                     |
+| 3    | Not macOS.                                                                                                                                         |
+| 4    | Something that is not a `claude-computer` clone is already at the target directory.                                                                |
+| 5    | The Command Line Tools installer did not finish within 30 minutes.                                                                                 |
+| 6    | The repo of that name is not a private instance: it is the template, a template repo, or public. An interactive run asks for another name instead. |
 
 ## The equivalent by hand
 
@@ -113,6 +192,12 @@ brew install gh && gh auth login
 brew install --cask claude-code
 cd ~ && gh repo create claude-computer --template narendranag/claude-computer --private --clone
 cd ~/claude-computer && git config core.hooksPath .githooks && claude
+```
+
+On a second machine, replace the `gh repo create` line with a clone of the repo the first machine made — the same repo, at the same path:
+
+```bash
+gh repo clone <you>/sys-admin ~/claude-computer
 ```
 
 Two differences worth knowing. The Homebrew installer finishes by printing two `eval "$(… shellenv)"` lines — **run them**, or `brew` is not on your `PATH` and the third command fails with `command not found`. And `gh repo create --clone` clones into `./<name>` in whatever directory you are in; the script runs `gh repo create` and `gh repo clone` separately so that `--dir` can point anywhere.
@@ -139,16 +224,18 @@ Two differences worth knowing. The Homebrew installer finishes by printing two `
 
 **`gh auth login` in a session with no browser** — over SSH, or in a terminal on a machine with no GUI. Choose "Login with a web browser" anyway and open the URL and code it prints on any other device; or generate a personal access token on github.com and paste it. If the script cannot get you logged in, it stops with exit 1 and everything before it stays done, so re-running picks up from there.
 
-**The repo name is already taken.** If `claude-computer` already exists on your account _and is a private repo that is not a template_, the script clones it instead of creating a second one, and says so — that is the documented second-machine path, and it is what you want on machine two. A private fork of the template counts and is allowed. If the name belongs to something unrelated, pass `--name` and `--dir`:
+**The repo name is already taken.** If `claude-computer` already exists on your account _and is a private repo that is not a template_, the script clones it instead of creating a second one, and says so — that is the documented second-machine path, and it is what you want on machine two. A private fork of the template counts and is allowed. If the name belongs to something unrelated, answer the question with another name, or pass it:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --name my-fleet --dir ~/my-fleet
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --name sys-admin --dir ~/claude-computer
 ```
 
-**"…is a template repository, not an instance" / "…is public" (exit 6).** A repo of the right _name_ is not automatically your instance. If you are the template's owner, `claude-computer` on your account **is** the template. If you have forked the template to contribute, `<you>/claude-computer` is a public fork of it. In both cases cloning it as your fleet brain would mean pushing a map of your machines — hostnames, ports, what is installed and listening — to a repo the world can read, so the script stops before touching anything. Either give your instance a different name:
+Whatever you pick, use the same name on every machine you own, and leave the directory at `~/claude-computer`.
+
+**"…is a template repository, not an instance" / "…is public" (exit 6).** A repo of the right _name_ is not automatically your instance. If you are the template's owner, `claude-computer` on your account **is** the template. If you have forked the template to contribute, `<you>/claude-computer` is a public fork of it. In both cases cloning it as your fleet brain would mean pushing a map of your machines — hostnames, ports, what is installed and listening — to a repo the world can read, so the script stops before touching anything. An interactive run does not stop: it says why and asks for another name. Otherwise give your instance a different name yourself — the same one on every machine:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --name my-claude-computer
+/bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)" -- --name sys-admin --dir ~/claude-computer
 ```
 
 or, if that repo really is meant to be your instance, make it private first with `gh repo edit <owner>/<name> --visibility private` and run the one-liner again. A **private** fork of the template is fine and is used as-is. If you already have a clone on disk whose origin is public, the script warns rather than stopping — but fix the origin before `/setup` pushes anything.
