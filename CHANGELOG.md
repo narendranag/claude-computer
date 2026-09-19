@@ -9,7 +9,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 ### Added
 
 - `install.sh` — the one-liner behind `https://claude-computer.com/install.sh`. It does what the README's four commands do (Xcode Command Line Tools, Homebrew, `gh` and its login, the Claude Code cask) and then creates your private copy of the template, checking each component first so it is safe to re-run. `--dry-run`, `--yes`, `--dir`, `--name`, `--public-clone`; `CC_INSTALL_TEMPLATE` for forks. It is self-contained — it runs before the repo exists on the machine, so it cannot source `lib/common.sh`. Documented in [`docs/INSTALL.md`](docs/INSTALL.md).
-- `tests/install-dry-run.sh` — eight simulated machines through `install.sh --dry-run`, on a temporary `PATH` of logging stubs. The load-bearing assertion is that no mutating command appears in the stub log. In CI, in the `shell` job.
+- `tests/install-dry-run.sh` — thirteen simulated machines through `install.sh`, on a temporary `PATH` of logging stubs. The load-bearing assertions are that no mutating command appears in the stub log during a dry run, and that no `/usr/bin` Xcode shim is invoked before the Command Line Tools are installed. In CI, in the `shell` job.
+
+### Fixed
+
+- `install.sh` no longer invokes `/usr/bin/git` before the Command Line Tools are installed. On a Mac without them, `/usr/bin/git`, `/usr/bin/clang` and `/usr/bin/python3` are one shim binary that opens the "install developer tools" GUI dialog when run, so the preflight's git-identity check popped that dialog on a genuinely fresh Mac — under `--dry-run` too, which promises to change nothing and ask nothing. Presence is now decided from the developer directory on disk, and git and clang are executed only once the real binaries are there.
+- `install.sh` waits for GitHub to finish copying the template. `gh repo create --template` returns before the new repo is populated, so the `gh repo clone` straight after it could produce an empty clone and then die with a misleading "not a copy of the template". It now polls for up to 60 seconds, and a clone of your own repo with no `CLAUDE.md` in it is recognised as resumable rather than refused with exit 4.
+- `install.sh` qualifies `gh repo view` and `gh repo clone` with the account once it is known: a bare repo name can resolve against the current directory's git remote instead of the logged-in user.
 
 ## [0.2.1] — 2026-09-19
 
