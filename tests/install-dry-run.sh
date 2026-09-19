@@ -705,6 +705,9 @@ export CC_INSTALL_TEST_ZPROFILE="$D/zprofile"
 PATH="$D/bin:$SYSBIN" "$INSTALL" --dry-run --yes --dir "$D/cc" > "$D/out" 2>&1
 check_exit 6 $?
 contains "$D/out" "is public."
+# The preflight names the problem instead of first promising to finish the clone off.
+contains "$D/out" "is PUBLIC — a machine map must not be pushed there"
+absent "$D/out" "finished off"
 assert_no_mutation "$CC_STUB_LOG"
 
 # --------------------------------------------------------------------------

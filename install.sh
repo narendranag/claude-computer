@@ -542,12 +542,21 @@ if [ "$PUBLIC_CLONE" -eq 1 ]; then
 elif [ "$DIR_STATE" = "clone" ]; then
   have "nothing to create — $DIR is already there"
 elif [ "$DIR_STATE" = "unfinished" ]; then
-  will "the half-filled clone at $DIR finished off — no new repo is created"
   # Resuming still means filling a local clone from a remote, so the remote still has to be
-  # an instance and not the template or a public fork.
+  # an instance and not the template or a public fork. The verdict comes first, as it does on
+  # the exists-remote path below: promising to finish the clone off and then refusing in the
+  # next breath reads like a bug.
   case "$REPO_VERDICT" in
-    template|public) refuse_unsuitable_repo ;;
+    template)
+      needs_you "$REPO_SLUG is a TEMPLATE repo, not an instance — the half-filled clone at $DIR cannot be finished off from it"
+      refuse_unsuitable_repo
+      ;;
+    public)
+      needs_you "$REPO_SLUG is PUBLIC — a machine map must not be pushed there, so the half-filled clone at $DIR cannot be your instance"
+      refuse_unsuitable_repo
+      ;;
   esac
+  will "the half-filled clone at $DIR finished off — no new repo is created"
 elif [ "$DIR_STATE" = "occupied" ]; then
   err "$DIR already exists and is not a claude-computer clone."
   say "Move it aside, or pass --dir <somewhere else>, and run this again."
