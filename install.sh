@@ -363,7 +363,12 @@ ask_repo_name() {
       set_repo_slug
       return 0
     fi
-    warn "not a usable GitHub repo name: letters, digits, dot, dash and underscore only."
+    # No default to fall back on here, so an empty answer is not a typo to be corrected.
+    if [ -z "$NAME_REPLY" ]; then
+      warn "it needs a name — there is no default this time. sys-admin would do."
+    else
+      warn "not a usable GitHub repo name: letters, digits, dot, dash and underscore only."
+    fi
   done
   die 2 "no usable repo name after three tries."
 }
