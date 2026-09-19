@@ -656,35 +656,104 @@ def draw_loop(t: dict) -> str:
 # Diagram 4 — Four forms, one rule
 # ---------------------------------------------------------------------------
 
+# bin/ chip sizing and the panel's minimum breathing room around the footer line. Extracted so
+# the layout pass (which decides the canvas height) and the draw pass (which paints at those
+# exact coordinates) can never disagree — the bug this replaced was a hand-guessed panel height
+# that content could silently outgrow.
+CHIP_H, CHIP_ROW, CHIP_GAP, GROUP_GAP = 22, 28, 7, 38
+FOOTER_GAP_MIN, FOOTER_MARGIN_MIN = 20, 16   # guard thresholds (tighter than the layout's own)
+
+
+def _wrap_group(names: list[str], start_x: float, limit_x: float) -> list[list[tuple[str, int]]]:
+    """Chips for one group, wrapped into rows of (name, pill-width) the way they're drawn."""
+    rows: list[list[tuple[str, int]]] = [[]]
+    xx = start_x
+    for n in names:
+        w = int(len(n) * 7.3 + 18)
+        if xx + w > limit_x and rows[-1]:
+            rows.append([])
+            xx = start_x
+        rows[-1].append((n, w))
+        xx += w + CHIP_GAP
+    return rows
+
+
 def draw_forms(t: dict) -> str:
     W = 1280
-    s = SVG(W, 600, t, "Four forms, one rule",
+    forms = [
+        ("Slash command", "needs judgment or a conversation", "claude-global/commands/",
+         ["/inbox", "/transcripts", "/today", "/new-app", "/review", "/setup"], "hand", "pills"),
+        ("Hook", "must happen every time, without asking", "claude-global/settings.json",
+         ["SessionStart → pull · transcripts · tasks", "Stop → push docs/ · tg-send", "Notification → tg-send"],
+         "human", "lines"),
+        ("Scheduled job", "must happen without a session", "bin/schedule → launchd",
+         ["on change|transcripts-sync", "hourly|tasks-sync, resources-sync", "06:00|feeds-sync",
+          "06:30|daily note", "09:00|map-check", "weekly|library-push"], "r2", "lines"),
+    ]
+    groups = [
+        ("plumbing", ["secrets-unlock", "vault-setup", "tg-send", "tasks-sync", "map-check", "security-check", "schedule"]),
+        ("research", ["tavily", "exa", "firecrawl", "jina", "browse"]),
+        ("google", ["gcal", "gmail", "gdrive"]),
+        ("storage", ["archive-push", "archive-pull", "camera-ingest", "library-push", "resources-sync"]),
+        ("daily", ["feeds-sync", "transcripts-sync", "new-app", "wt"]),
+    ]
+
+    lx, ly, lw, base_gap = 48, 176, 600, 16
+    bx = lx + lw + 116
+    bw = W - 48 - bx
+    chip_x0, chip_limit = bx + 116, bx + bw - 20
+
+    # --- left column: each card's height comes from what it actually holds -----------------
+    card_h = []
+    for _, _, _, ex, _, kind in forms:
+        if kind == "pills":
+            rows = -(-len(ex) // 3)
+            right_bottom = 26 + (rows - 1) * 30 + 22
+        else:
+            step = 20 if len(ex) <= 4 else 17
+            right_bottom = 28 + (len(ex) - 1) * step + 8
+        card_h.append(max(104, right_bottom + 34))
+    left_natural = sum(card_h) + base_gap * (len(card_h) - 1)
+
+    # --- right panel: lay out the chip grid first, in relative coordinates -----------------
+    gy = 96
+    group_layout = []  # (label, rows, top-y-relative-to-panel)
+    last_row_bottom = 96
+    for g, names in groups:
+        rows = _wrap_group(names, chip_x0, chip_limit)
+        group_layout.append((g, rows, gy))
+        last_row_bottom = gy + CHIP_ROW * (len(rows) - 1) + CHIP_H
+        gy = gy + CHIP_ROW * (len(rows) - 1) + GROUP_GAP
+    footer_rel = last_row_bottom + 26   # gap above the footer baseline
+    panel_natural = footer_rel + 24     # margin below the footer, to the card's own bottom edge
+
+    # --- both blocks end at the same y: stretch whichever is shorter, not the taller one ----
+    final_h = max(left_natural, panel_natural)
+    n_gaps = len(card_h) - 1
+    gap = base_gap + ((final_h - left_natural) / n_gaps if n_gaps else 0)
+
+    by, bh = ly, final_h
+    canvas_h = by + bh + 44
+
+    s = SVG(W, canvas_h, t, "Four forms, one rule",
             "Workflows take four forms: scripts in bin/ for anything deterministic; slash commands when judgment or a "
             "conversation is needed; hooks for what must happen every time; scheduled jobs for what must happen without "
             "a session. Commands, hooks and schedules all call scripts rather than reimplementing them.")
     s.header("Diagram 4 · Workflows", "If it can be a script, it's a script.",
              "Everything else is a way of deciding when a script runs — and who, if anyone, has to be in the room.")
 
-    forms = [
-        ("Slash command", "needs judgment or a conversation", "claude-global/commands/",
-         ["/inbox", "/transcripts", "/today", "/new-app", "/review", "/setup"], "hand"),
-        ("Hook", "must happen every time, without asking", "claude-global/settings.json",
-         ["SessionStart → pull · transcripts · tasks", "Stop → push docs/ · tg-send", "Notification → tg-send"], "human"),
-        ("Scheduled job", "must happen without a session", "bin/schedule → launchd",
-         ["on change|transcripts-sync", "hourly|tasks-sync, resources-sync", "06:00|feeds-sync", "06:30|daily note", "09:00|map-check"], "r2"),
-    ]
-    lx, ly, lw, lh, gap = 48, 176, 600, 124, 16
-    for i, (name, when, where, ex, key) in enumerate(forms):
-        y = ly + i * (lh + gap)
+    arrow_target_y = by + bh / 2
+    y = ly
+    for i, (name, when, where, ex, key, kind) in enumerate(forms):
+        h = card_h[i]
         c = t[key]
-        card(s, lx, y, lw, lh)
-        s.rect(lx, y, 5, lh, r=2.5, fill=c)
+        card(s, lx, y, lw, h)
+        s.rect(lx, y, 5, h, r=2.5, fill=c)
         s.text(lx + 24, y + 32, name, 17, 700)
         s.text(lx + 24, y + 52, when, 13, 400, t["muted"])
-        s.text(lx + 24, y + 104, where, 11.5, 600, c, mono=True)
-        # examples (right half)
+        s.text(lx + 24, y + h - 20, where, 11.5, 600, c, mono=True)
         ex_x = lx + 300
-        if key == "hand":
+        if kind == "pills":
             for j, e in enumerate(ex):
                 col, row = j % 3, j // 3
                 s.pill(ex_x + col * 98, y + 26 + row * 30, e, c, size=11, h=22, mono=True, width=92)
@@ -692,44 +761,46 @@ def draw_forms(t: dict) -> str:
             step = 20 if len(ex) <= 4 else 17
             for j, e in enumerate(ex):
                 if "|" in e:  # "when|what" in two aligned columns (SVG collapses runs of spaces)
-                    when, what = e.split("|", 1)
-                    s.text(ex_x, y + 28 + j * step, when, 11, 700, c, mono=True)
-                    s.text(ex_x + 84, y + 28 + j * step, what, 11.5, 500, t["ink"], mono=True)
+                    lhs, rhs = e.split("|", 1)
+                    s.text(ex_x, y + 28 + j * step, lhs, 11, 700, c, mono=True)
+                    s.text(ex_x + 84, y + 28 + j * step, rhs, 11.5, 500, t["ink"], mono=True)
                 else:
                     s.text(ex_x, y + 32 + j * step, e, 11.5, 500, t["ink"], mono=True)
-        # arrow to bin/
-        s.path(f"M{lx + lw + 4},{y + lh / 2} C{lx + lw + 60},{y + lh / 2} {lx + lw + 60},{ly + 200} {lx + lw + 112},{ly + 200}",
+        # arrow to bin/, converging on the shared vertical center of both blocks
+        s.path(f"M{lx + lw + 4},{y + h / 2} C{lx + lw + 60},{y + h / 2} {lx + lw + 60},{arrow_target_y} {lx + lw + 112},{arrow_target_y}",
                t["faint"], 1.6, end=True)
+        y += h + gap
 
-    bx, by, bw, bh = lx + lw + 116, ly, W - 48 - (lx + lw + 116), 3 * lh + 2 * gap
     card(s, bx, by, bw, bh, stroke=t["accent"])
     s.rect(bx, by, bw, 5, r=2.5, fill=t["accent"])
     s.text(bx + 26, by + 40, "Script", 20, 700)
     s.text(bx + 26, by + 62, "deterministic · no judgment · answers --help", 13, 400, t["muted"])
     s.text(bx + bw - 26, by + 40, "bin/", 16, 700, t["accent"], "end", mono=True)
-    groups = [
-        ("plumbing", ["secrets-unlock", "tg-send", "tasks-sync", "map-check", "security-check", "schedule"]),
-        ("research", ["tavily", "exa", "firecrawl", "jina", "browse"]),
-        ("google", ["gcal", "gmail", "gdrive"]),
-        ("storage", ["archive-push", "archive-pull", "camera-ingest", "library-push", "resources-sync"]),
-        ("daily", ["feeds-sync", "transcripts-sync", "new-app", "wt"]),
-    ]
-    gy = by + 96
-    for g, names in groups:
-        s.text(bx + 26, gy + 14, g, 11, 700, t["faint"], ls="0.1em", upper=True)
-        xx = bx + 116
-        for n in names:
-            w = int(len(n) * 7.3 + 18)
-            if xx + w > bx + bw - 20:
-                gy += 28
-                xx = bx + 116
-            s.rect(xx, gy, w, 22, r=6, fill=t["sunk"], stroke=t["line"])
-            s.text(xx + w / 2, gy + 15, n, 11.5, 550, t["ink"], "middle", mono=True)
-            xx += w + 7
-        gy += 38
-    s.text(bx + 26, by + bh - 22, "Keys via bw get · output prefixed [host] · exit codes, not prose", 12, 500,
+
+    for g, rows, gy0 in group_layout:
+        s.text(bx + 26, by + gy0 + 14, g, 11, 700, t["faint"], ls="0.1em", upper=True)
+        for ri, row in enumerate(rows):
+            row_y = by + gy0 + ri * CHIP_ROW
+            row_bottom = row_y + CHIP_H
+            # Guard: a row must clear the footer line and the panel's own bottom edge. Since
+            # the layout above derives the panel height from this same content, this only trips
+            # if a future edit re-hardcodes the height or the footer position independently of it.
+            if row_bottom + FOOTER_GAP_MIN > by + footer_rel:
+                WIDE.add(f"forms panel: {g} row {ri} bottom {row_bottom:.0f}px is within "
+                          f"{FOOTER_GAP_MIN}px of the footer line ({by + footer_rel:.0f}px)")
+            if row_bottom + FOOTER_MARGIN_MIN > by + bh:
+                WIDE.add(f"forms panel: {g} row {ri} bottom {row_bottom:.0f}px is within "
+                          f"{FOOTER_MARGIN_MIN}px of the panel's bottom edge ({by + bh:.0f}px)")
+            xx = chip_x0
+            for n, w in row:
+                fits(n, 11.5, w - 18, f"bin/ chip {n!r}")
+                s.rect(xx, row_y, w, CHIP_H, r=6, fill=t["sunk"], stroke=t["line"])
+                s.text(xx + w / 2, row_y + 15, n, 11.5, 550, t["ink"], "middle", mono=True)
+                xx += w + CHIP_GAP
+
+    s.text(bx + 26, by + footer_rel, "Keys via bw get · output prefixed [host] · exit codes, not prose", 12, 500,
            t["muted"])
-    s.h = by + bh + 44
+    s.h = canvas_h
     return s.render()
 
 
