@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Changed
+
+- README Quick start says plainly that the repo name and the folder are two things: you choose the repo's name (the author's is `sys-admin`), and it is always cloned to `~/claude-computer`, because the hooks and permission rules assume that folder.
+
 ## [0.3.2] — 2026-09-19
 
 A claim made true, a dry run that speaks, and a diagram that checks its own layout.

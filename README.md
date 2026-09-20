@@ -27,9 +27,9 @@ You need a Mac on a recent macOS — recent enough that Homebrew still supports 
    /bin/bash -c "$(curl -fsSL https://claude-computer.com/install.sh)"
    ```
 
-   It installs Xcode's Command Line Tools, Homebrew, `gh` and Claude Code, skipping whatever you already have; creates your private copy of this template at `~/claude-computer`; and puts the first prompt on your clipboard. **You type every password and do every login** — it never reads, writes or asks for a credential.
+   It installs Xcode's Command Line Tools, Homebrew, `gh` and Claude Code, skipping whatever you already have; creates your private repo from this template — you choose its name; I called mine `sys-admin` — and clones it to `~/claude-computer`, the same folder on every machine whatever the repo is called, because the hooks and permission rules assume it; and puts the first prompt on your clipboard. **You type every password and do every login** — it never reads, writes or asks for a credential.
 
-   It asks one question: what your private repo should be called. Take the default and you get `<you>/claude-computer` cloned to `~/claude-computer` — and that is **one repo for every machine you own**, so on a second machine you run the same command and it clones that repo instead of creating another. Want a different name? I called mine `sys-admin`: `-- --name sys-admin --dir ~/claude-computer`, the same on every machine ([why, and what happens if you get it wrong](docs/INSTALL.md#one-repo-for-the-whole-fleet)).
+   It asks one question: what your private repo should be called. Take the default and you get `<you>/claude-computer` cloned to `~/claude-computer` — and that is **one repo for every machine you own**, so on a second machine you run the same command and it clones that repo instead of creating another. Rather pass the name than be asked? `-- --name sys-admin --dir ~/claude-computer`, the same on every machine ([why, and what happens if you get it wrong](docs/INSTALL.md#one-repo-for-the-whole-fleet)).
 
    Read it before you run it — it is a shell script from the internet, and the whole premise here is that you stay the one who decides:
 
