@@ -15,4 +15,4 @@ System context: `~/claude-computer/docs/`.
 
 - Ask before every push that deletes locally. Never delete from R2 unless I ask for that specific path.
 - Don't archive: git repos with unpushed commits, anything with secrets in it, `~/resources` (it has its own encrypted sync).
-- Remote: `r2:<bucket>/archive/`. Keys come from Bitwarden; there is no `rclone.conf` with keys.
+- Remote: `r2:<bucket>/archive/`. Keys come from the secrets store (`r2.*`); there is no `rclone.conf` with keys.

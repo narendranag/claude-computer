@@ -17,4 +17,4 @@
 ## Rules
 
 - This repo is private and stays private: `security-check` fails if it is public.
-- Never commit a credential the client shares with you. It goes in Bitwarden (`claude-computer/client-__NAME__-*`).
+- Never commit a credential the client shares with you in plaintext. It goes in this repo's own sops file, `secrets/secrets.yaml`, encrypted to the same keys as the fleet's store — see "Client secrets" in `~/claude-computer/secrets/README.md`. I type the values; you never decrypt them.

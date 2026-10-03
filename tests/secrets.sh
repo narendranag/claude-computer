@@ -455,6 +455,18 @@ contains "$OUT" "secrets: key:        none"
 mv "$WORK/ka.moved" "$KA"
 
 # =========================================================================
+case_new "a machine file with a broken age_recipient stops every write"
+cp "$INST/docs/machines/beta.md" "$WORK/beta.bak"
+sed -e 's/^age_recipient:.*/age_recipient: not-a-key/' "$WORK/beta.bak" > "$INST/docs/machines/beta.md"
+grep -q '^age_recipient: not-a-key' "$INST/docs/machines/beta.md" || printf -- '---\nhost: beta\nage_recipient: not-a-key\n---\n' > "$INST/docs/machines/beta.md"
+cp "$INST/.sops.yaml" "$WORK/sops.bak"
+on alpha "$S" recipients --no-commit
+check_exit 5 "$rc"
+contains "$OUT" "beta.md: age_recipient is not an age public key"
+cmp -s "$INST/.sops.yaml" "$WORK/sops.bak" && ok ".sops.yaml untouched" || bad ".sops.yaml rewritten"
+cp "$WORK/beta.bak" "$INST/docs/machines/beta.md"
+
+# =========================================================================
 case_new "push is designed, not built"
 on alpha "$S" push some-box
 check_exit 5 "$rc"

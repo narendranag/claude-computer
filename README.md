@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/hero-dark.svg">
-  <img alt="Install the operator first. One command pasted into Terminal — the install.sh one-liner — then cd into your copy and start Claude Code, which sets up the rest: the machine map, SSH key, tailnet, Bitwarden, hooks, Brewfiles, brains and the daily loop. The four commands can still be typed by hand." src="docs/diagrams/hero.svg" width="100%">
+  <img alt="Install the operator first. One command pasted into Terminal — the install.sh one-liner — then cd into your copy and start Claude Code, which sets up the rest: the machine map, SSH key, tailnet, secrets, hooks, Brewfiles, brains and the daily loop. The four commands can still be typed by hand." src="docs/diagrams/hero.svg" width="100%">
 </picture>
 
 # claude-computer
@@ -13,7 +13,7 @@ _A Claude-first Mac setup for a solo developer._
 
 A GitHub template that sets up a Mac for a solo developer. It assumes you have a Claude Max subscription and like terminal-first development in Claude Code — you step in for the key decisions, judgement and taste. Mac + Claude is the best combination IMO. The point is to get things done FAST, by cutting the time you spend on cruft.
 
-It's part stack (Claude + Tailscale + GitHub + Bitwarden + Cloudflare + Homebrew), part organization (an opinionated take on folders and repos), part process (slash commands, hooks, scheduled jobs) — all designed to take advantage of the Mac + Claude combination.
+It's part stack (Claude + Tailscale + GitHub + sops/age + Cloudflare + Homebrew), part organization (an opinionated take on folders and repos), part process (slash commands, hooks, scheduled jobs) — all designed to take advantage of the Mac + Claude combination.
 
 I built this after spending a year arriving at a stack, pattern and process that has let me up my output exponentially. It is opinionated and reflects my learnings, taste and judgement. Change what doesn't fit. This repo is two things at once: the note that explains the approach, and the skeleton you clone to adopt it.
 
@@ -82,7 +82,7 @@ The human keeps three jobs:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/map-dark.svg">
-  <img alt="Diagram of the home directory: claude-computer, clients, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books, comics sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. Bitwarden feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
+  <img alt="Diagram of the home directory: claude-computer, clients, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books, comics sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. an encrypted secrets file feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
 </picture>
 
 The home directory gets a handful of top-level folders that sit beside the macOS defaults, not instead of them:
@@ -126,7 +126,7 @@ The home directory gets a handful of top-level folders that sit beside the macOS
 
 Thirty-eight steps in eight phases. The shape matters more than the count: **everything before step 14 is yours, and after it you only log in.**
 
-**Phase 0 — Accounts** (browser, before you touch the machine). Claude Max subscription, GitHub, Tailscale (sign in with GitHub), Bitwarden, Cloudflare with a spend alert, keys for the research services, PostHog, and a Telegram bot. Accounts come first because every later step that needs a login stalls without one — and Bitwarden comes fourth so no key is ever written anywhere else.
+**Phase 0 — Accounts** (browser, before you touch the machine). Claude Max subscription, GitHub, Tailscale (sign in with GitHub), Cloudflare with a spend alert, keys for the research services, PostHog, and a Telegram bot. Accounts come first because every later step that needs a login stalls without one — and each key goes straight into the encrypted secrets file the moment the machine has one, so it is never written anywhere else.
 
 **Phase 1 — One command**, or these four in stock Terminal.app — the by-hand path, and what [`install.sh`](install.sh) runs for you, checking each one first (see the [Quick start](#quick-start)):
 
@@ -167,8 +167,9 @@ Start with this computer. This is a new machine, so run /setup:
    this repo.
 3. Install Tailscale and walk me through logging in. Record the
    Tailscale name in the map.
-4. Install the Bitwarden CLI and walk me through `bw login`. Confirm
-   bin/secrets-unlock works.
+4. Install age and sops and run bin/secrets init (--first on the fleet's
+   first machine, then walk me through the paper backup key). Confirm
+   bin/secrets status.
 5. Link claude-global/ into ~/.claude so the hooks and commands are live.
 6. Install the Brewfile layers for this role, link dotfiles, run
    macos-defaults.sh. Tell me before each step that needs a password or a
@@ -182,7 +183,7 @@ docs/DECISIONS.md. When something is deferred, put it in TASKS.md under Later.
 At the end, commit and push docs/ and tell me what is left.
 ```
 
-**Phases 3–7 — Claude drives.** Foundation (map the host, SSH key, tailnet, Bitwarden, link `~/.claude` so hooks are live), environment (Brewfiles by role, dotfiles, macOS defaults, runtimes, Playwright, Agent Reach, the `bin/` wrappers, a first `tg-send`), folders and brains, workflows, and a closing pass that re-captures the Brewfiles from what's actually installed. The order is deliberate: hooks go live before anything assumes sync; Time Machine and the security baseline land before folders fill with data; brains are created only after the tools they call exist.
+**Phases 3–7 — Claude drives.** Foundation (map the host, SSH key, tailnet, link `~/.claude` so hooks are live), environment (Brewfiles by role, dotfiles, macOS defaults, runtimes, Playwright, Agent Reach, the `bin/` wrappers, a first `tg-send`), folders and brains, workflows, and a closing pass that re-captures the Brewfiles from what's actually installed. The order is deliberate: hooks go live before anything assumes sync; Time Machine and the security baseline land before folders fill with data; brains are created only after the tools they call exist.
 
 `/setup` covers foundation, environment and protection; it ends by queueing folders, brains and workflows in `TASKS.md` as the next jobs, so each gets its own conversation.
 
@@ -192,7 +193,7 @@ At the end, commit and push docs/ and tell me what is left.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/loop-dark.svg">
-  <img alt="The session loop: SessionStart hook pulls the repo and checks Bitwarden; Claude orients by reading CLAUDE.md, the machine file and FLEET.md; work; record changes in the machine file, DECISIONS.md and TASKS.md; Stop hook commits docs as [host] and pushes. The shared repo holds one file per machine, each written only by its own machine." src="docs/diagrams/loop.svg" width="100%">
+  <img alt="The session loop: SessionStart hook pulls the repo and checks the secrets key; Claude orients by reading CLAUDE.md, the machine file and FLEET.md; work; record changes in the machine file, DECISIONS.md and TASKS.md; Stop hook commits docs as [host] and pushes. The shared repo holds one file per machine, each written only by its own machine." src="docs/diagrams/loop.svg" width="100%">
 </picture>
 
 `~/claude-computer` is a private repo created from this template, cloned on every machine that runs Claude Code. Four files carry the weight:
@@ -208,7 +209,7 @@ At the end, commit and push docs/ and tell me what is left.
 
 **Per-machine files in one shared repo.** I started with "no shared map" — each machine keeps its own. It fell apart the first time one machine needed to manage another. Now the repo is shared and the _files_ are per machine: a laptop writes only `machines/laptop.md` plus the file of any headless box it changed. Conflicts are rare by construction, and when two managers touch the same box in overlapping sessions, the rebase surfaces it and Claude merges markdown well. **A machine's identity is its hostname, not the repo's name** — `scutil --get LocalHostName` picks the file it writes and tags its commits — so give each machine a name you would recognise (`sudo scutil --set LocalHostName mini`, [yours to run](docs/INSTALL.md#where-per-machine-identity-comes-from)) before `/setup`.
 
-**Hooks do the syncing, not discipline.** The `SessionStart` hook pulls with `--rebase --autostash`, reports whether Bitwarden is unlocked, and refreshes task copies in the vault. The `Stop` hook commits any `docs/` change as `[host] update …` and pushes, at the end of every turn — because sessions get killed far more often than they get exited.
+**Hooks do the syncing, not discipline.** The `SessionStart` hook pulls with `--rebase --autostash`, reports whether this machine can read the secrets store, and refreshes task copies in the vault. The `Stop` hook commits any `docs/` change — and `secrets/`, if every value in it is encrypted — as `[host] update …` and pushes, at the end of every turn — because sessions get killed far more often than they get exited.
 
 **The backstop on each box.** Headless boxes have no brain; a manager reaches them over SSH on the tailnet. After changing one, the manager also writes that box's file to `/etc/claude-computer/machine.md` on the box itself. If the repo is ever stale, or the box is reimaged, the box can still say what it is.
 
@@ -216,31 +217,31 @@ At the end, commit and push docs/ and tell me what is left.
 
 Auto mode is only sane with guard rails. These are mine.
 
-**Auto mode, never bypass.** A classifier model reviews every action before it runs and blocks anything that goes beyond what you asked for, reaches infrastructure it doesn't recognize, or looks steered by content Claude just read. Rules sit on top: in [`claude-global/settings.json`](claude-global/settings.json), `git push`, `rm`, `rclone`, `sudo` and the storage scripts are on the _ask_ list, which prompts even in auto mode; force-push, raw `bw get`, the Keychain item holding the Bitwarden session token, and reading browser profiles are on the _deny_ list, which blocks in every mode. Anything the classifier refuses three times in a row drops the session back to asking you. The lists raise the bar and remove whole categories of accident. They are not a sandbox — see below.
+**Auto mode, never bypass.** A classifier model reviews every action before it runs and blocks anything that goes beyond what you asked for, reaches infrastructure it doesn't recognize, or looks steered by content Claude just read. Rules sit on top: in [`claude-global/settings.json`](claude-global/settings.json), `git push`, `rm`, `rclone`, `sudo` and the storage scripts are on the _ask_ list, which prompts even in auto mode; force-push, decrypting the secrets store (`sops decrypt`, `secrets env`), reading the age key, and reading browser profiles are on the _deny_ list, which blocks in every mode. Anything the classifier refuses three times in a row drops the session back to asking you. The lists raise the bar and remove whole categories of accident. They are not a sandbox — see below.
 
 **One job runs unattended.** Everything else here assumes you are at the keyboard. The `daily-note` job in [`bin/schedule`](bin/schedule) is the exception: at 06:30 launchd runs `claude -p` with nobody to answer a prompt. So it is fenced in twice — its working directory is `~/vault`, which is the only tree it can edit, and `--allowedTools` limits it to `Read`, `Edit`, `Write`, `Glob`, `Grep` and `git status` / `add` / `commit`. Everything else is refused outright rather than queued for an approval that will never come. If you add a scheduled job that runs Claude, do the same, and say so in your `docs/DECISIONS.md`.
 
 **One SSH key per machine.** Generated on the machine, registered on GitHub under the machine's name, never copied. Losing a laptop means revoking one key.
 
-**Bitwarden is the only secret store.** API keys, bot tokens, R2 credentials, the crypt password, Google's OAuth client — all Bitwarden items, read at run time by the scripts in `bin/` through `bw get`. There is no `.env` with keys in any repo, no `rclone.conf` with credentials on disk (remotes are defined from environment variables for the life of one command), and no key on a command line (curl reads auth headers from stdin, so nothing shows in `ps`). You unlock once per login; the session token lives in the macOS Keychain so every script and hook shares it. [`docs/SECRETS.md`](docs/SECRETS.md) lists every item the scripts expect.
+**One encrypted file holds every machine secret.** API keys, bot tokens, R2 credentials, the crypt password, Google's OAuth client — all values in `secrets/secrets.yaml`, encrypted with [sops](https://github.com/getsops/sops) to an [age](https://age-encryption.org) key on each manager plus a paper backup key, committed to your private instance, and decrypted one value at a time by the scripts in `bin/`. Claude never decrypts anything. There is no `.env` with keys in any repo, no `rclone.conf` with credentials on disk (remotes are defined from environment variables for the life of one command), and no key on a command line (curl reads auth headers from stdin, and values reach sops through a pipe, so nothing shows in `ps`). There is no unlock step: each machine's key file is the credential, behind FileVault and mode 600, so scheduled jobs just work. Open source end to end, no account, no server, the same on Linux. [`docs/SECRETS.md`](docs/SECRETS.md) lists every secret the scripts expect.
 
-**The password-migration rule.** Moving from Apple Passwords, Chrome or 1Password into Bitwarden is a Claude-guided job where **you do every step that touches a credential**. You export; Claude runs `bw import`, confirms the item count, and securely deletes the export — without ever reading it. Then you turn off password saving everywhere else, so there is one store.
+**Machine secrets and human logins are different things.** Website logins and passkeys stay in your password manager — Apple Passwords is enough. The secrets file holds only what scripts need. If your keys sit in a plaintext dotenv file today, `secrets import-env` moves them in one pass, printing names and counts and never a value; **you do every step that types a credential**.
 
 **Browser profiles are credentials too.** Headless browsing uses Playwright's own Chromium through `bin/browse`, and its persistent profiles hold logged-in sessions. They live in `~/.config/browse/profiles/`, mode 700, are listed as a sensitive location in every machine file, are unreadable by Claude in settings, and `security-check` fails if they're ever inside a git work tree.
 
-**Agent Reach's login channels are an exception you choose.** X, Reddit, LinkedIn and the rest work by keeping a cookie or key in `~/.agent-reach/config.yaml`, outside Bitwarden, or by driving your logged-in Chrome. None is installed by default. If you want one, you run `agent-reach configure` yourself. Claude is set to ask before that command and a deny rule covers reading the file — a pattern match, not a sandbox, like every rule here — and `security-check` fails if the file is not mode 600. Use a secondary account: platforms ban accounts they catch being scripted.
+**Agent Reach's login channels are an exception you choose.** X, Reddit, LinkedIn and the rest work by keeping a cookie or key in `~/.agent-reach/config.yaml`, outside the secrets store, or by driving your logged-in Chrome. None is installed by default. If you want one, you run `agent-reach configure` yourself. Claude is set to ask before that command and a deny rule covers reading the file — a pattern match, not a sandbox, like every rule here — and `security-check` fails if the file is not mode 600. Use a secondary account: platforms ban accounts they catch being scripted.
 
 **Time Machine is the net.** Auto mode on a machine you care about needs a whole-machine rollback. Pick a target during setup — an external disk or a box on the tailnet — and record it in the map.
 
 **A pre-commit secret scan everywhere.** `gitleaks` runs on every commit in this repo, in your instance, and in every project `new-app` scaffolds. It's the backstop, not the plan.
 
-**What this does not protect against.** Worth being plain about, because the list above can read as stronger than it is. The ask and deny rules are pattern matches on command strings, not a sandbox: they stop the obvious spelling of a thing, not every spelling of it, and a command that reaches the same place by another route — a script, an alias, an interpreter — goes through. The Bitwarden session token sits in the login Keychain precisely so that every script and hook can read it, which means any process you run can read it too; denying Claude the `security` command that fetches it is a speed bump, not a boundary. The `Stop` hook commits and pushes `docs/` at the end of every turn, so whatever went into the map during a turn you didn't fully read is already on GitHub. And the one scheduled job above runs Claude with no one watching. None of this is an argument against the setup — it is an argument for the two things that actually bound the damage: Time Machine, and reading what the map says changed.
+**What this does not protect against.** Worth being plain about, because the list above can read as stronger than it is. The ask and deny rules are pattern matches on command strings, not a sandbox: they stop the obvious spelling of a thing, not every spelling of it, and a command that reaches the same place by another route — a script, an alias, an interpreter — goes through. Each machine's age key sits unencrypted in `~/.config/sops/age/keys.txt` precisely so that every script and hook can use it without an unlock, which means any process you run can read it too; denying Claude the commands that read it is a speed bump, not a boundary. Removing a machine re-encrypts the file, but git history keeps the old ciphertext, so revoking one means rotating its secrets at each provider. The `Stop` hook commits and pushes `docs/` at the end of every turn, so whatever went into the map during a turn you didn't fully read is already on GitHub. And the one scheduled job above runs Claude with no one watching. None of this is an argument against the setup — it is an argument for the two things that actually bound the damage: Time Machine, and reading what the map says changed.
 
 ## Tools
 
 **Brewfiles in layers.** [`Brewfile`](Brewfile) is every machine: the tools the setup itself needs, the command-line tools Claude reaches for (`ripgrep`, `fd`, `ast-grep`, `jq`…), the terminal tools that are only for you (`fzf`, `bat`, `eza`, `git-delta`…), one version manager (`mise`) with `uv` and `pnpm`, media tools including `exiftool` and `ocrmypdf`, and the apps. [`Brewfile.dev`](Brewfile.dev) adds build-machine things (OrbStack, Calibre, `wrangler`, Xcode through `mas`); darktable, for the camera brain, is an optional manual install, since Homebrew disabled its cask. [`Brewfile.server`](Brewfile.server) is for headless Macs. What Homebrew can't install — oh-my-zsh, runtimes, Playwright and its Chromium, Agent Reach, the MacParakeet CLI link, VS Code extensions, the daily upgrade agent — is [`setup-tools.sh`](setup-tools.sh). Packages keep themselves current through the `domt4/autoupdate` tap: `brew autoupdate start 86400 --upgrade --cleanup` (current Homebrew asks you to `brew trust` the tap's command first; `setup-tools.sh` does both).
 
-**CLI first, MCP last.** An MCP server loads its full tool schemas into every session's context. Five research servers can cost thousands of tokens before you've typed anything, in every session, forever. So each service gets a thin wrapper in `bin/` instead — `tavily "query"`, `exa "query"`, `firecrawl <url>`, `jina <url>`, `browse <url>`, `gcal`, `gmail`, `gdrive` — that reads its key from Bitwarden and prints markdown. The global `CLAUDE.md` lists them in one paragraph. Standing context cost: one paragraph. MCP is reserved for things that are stateful or OAuth-bound in a way a wrapper can't handle. It's more work up front and permanently cheaper.
+**CLI first, MCP last.** An MCP server loads its full tool schemas into every session's context. Five research servers can cost thousands of tokens before you've typed anything, in every session, forever. So each service gets a thin wrapper in `bin/` instead — `tavily "query"`, `exa "query"`, `firecrawl <url>`, `jina <url>`, `browse <url>`, `gcal`, `gmail`, `gdrive` — that decrypts its key from the secrets file and prints markdown. The global `CLAUDE.md` lists them in one paragraph. Standing context cost: one paragraph. MCP is reserved for things that are stateful or OAuth-bound in a way a wrapper can't handle. It's more work up front and permanently cheaper.
 
 **Headless browsing is Playwright, not Chrome.** `browse` drives Playwright's bundled Chromium: markdown by default, `--screenshot`, `--pdf`, and `--profile` for sites you've logged into yourself with `browse --login`. Google Chrome stays the human's browser. The same engine runs end-to-end tests in every web app the scaffold creates. It even rendered the screenshots I used to check the diagrams in this README.
 
@@ -327,13 +328,13 @@ vault/
 | Upstream a lesson        | occasional          | `/upstream` → PR against this template                                 |
 | Rotate a secret          | ad hoc              | `/rotate`                                                              |
 
-**Build them in this order.** Plumbing first — unlock, notifications, the hooks, `tasks-sync`, `map-check` — because everything else assumes keys, sync and a trustworthy map. Then the daily loop, because you touch it every day. Then the per-trigger jobs, when their trigger first happens. `/setup` gets validated properly only when you build machine two.
+**Build them in this order.** Plumbing first — secrets, notifications, the hooks, `tasks-sync`, `map-check` — because everything else assumes keys, sync and a trustworthy map. Then the daily loop, because you touch it every day. Then the per-trigger jobs, when their trigger first happens. `/setup` gets validated properly only when you build machine two.
 
 ## What I'd tell my past self
 
 **1. Share the map, split the files.** I began with a rule that each machine keeps its own map and nothing is shared. It lasted until the first time the laptop needed to fix the Mac Studio. One shared repo with a file per machine, synced by hooks, gives every manager the whole fleet and almost never conflicts.
 
-**2. Plaintext secrets in a private repo are still plaintext.** My first version had a `.secrets` repo — private, gitignored everywhere else, and a copy of every key on every clone forever. Moving to Bitwarden cost one unlock per session. That's the whole price.
+**2. Plaintext secrets in a private repo are still plaintext.** My first version had a `.secrets` repo — private, gitignored everywhere else, and a copy of every key on every clone forever. Encrypting the values with sops and age, one key per machine, kept the convenience of a file in the repo and lost the plaintext. That's the whole trade.
 
 **3. Don't port a filing system designed for humans.** PARA asked me to decide where a note belonged at the moment I had the least context to decide. With Claude filing, the right structure is an inbox, a flat notes folder, and properties — and the discipline moves from "file correctly" to "capture everything."
 
@@ -352,11 +353,10 @@ vault/
 - [ ] A Claude Max subscription. All-day sessions in auto mode are the whole point, and they outrun anything smaller.
 - [ ] GitHub account (use it as your login everywhere it's offered)
 - [ ] Tailscale, signed in with GitHub
-- [ ] Bitwarden — every key from here on goes straight into an item
 - [ ] Cloudflare (R2, D1, Workers, DNS) — **set a spend alert**
-- [ ] Research service keys: Tavily, Firecrawl, Jina, Exa → Bitwarden
-- [ ] PostHog → Bitwarden, spend alert
-- [ ] Telegram: `/newbot` with @BotFather → token and chat id → Bitwarden
+- [ ] Research service keys: Tavily, Firecrawl, Jina, Exa → `secrets set` once the machine is set up (keep them out of notes and chats until then)
+- [ ] PostHog → `secrets set`, spend alert
+- [ ] Telegram: `/newbot` with @BotFather → token and chat id → `secrets set`
 - [ ] _Later:_ Google Cloud OAuth client for Gmail, Calendar and Drive ([how](docs/SECRETS.md#getting-each-value))
 
 **2. Install the operator and create your instance** — one line in Terminal.app:
@@ -403,7 +403,7 @@ Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md) — the installer already p
 
 </details>
 
-**Contributing.** Mostly you shouldn't have to — fork it and make it yours. But if you have made something general work (another camera, Linux, a tool that does what Bitwarden or R2 does here), [`CONTRIBUTING.md`](CONTRIBUTING.md) says how. Security problems go through a private advisory, never a public issue: [`SECURITY.md`](SECURITY.md).
+**Contributing.** Mostly you shouldn't have to — fork it and make it yours. But if you have made something general work (another camera, Linux, a tool that does what sops or R2 does here), [`CONTRIBUTING.md`](CONTRIBUTING.md) says how. Security problems go through a private advisory, never a public issue: [`SECURITY.md`](SECURITY.md).
 
 **Keeping up with the template.** Your instance keeps this repo as an `upstream` remote, fetch-only. Pull improvements when you choose. When you learn something worth sharing, `/upstream` rewrites it generically and opens a pull request here — never a push from your private instance.
 

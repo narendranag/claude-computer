@@ -27,6 +27,6 @@ Anything in this repo that would expose a secret, run something the user did not
 
 ## What is not
 
-- **The design limits, which are documented.** The deny rules are pattern matches, not a sandbox; the Bitwarden session token is in the login Keychain where every process the user runs can read it; the `Stop` hook pushes `docs/` at the end of every turn; the `daily-note` job runs Claude unattended. These are described in the README under [Trust](README.md#trust). If you have found a way to make one of them worse than described, that is in scope — the limit itself is not.
-- Vulnerabilities in the tools this repo installs. Report those upstream: Homebrew, Claude Code, Bitwarden, rclone, Tailscale, Playwright, Agent Reach.
+- **The design limits, which are documented.** The deny rules are pattern matches, not a sandbox; each machine's age key is unencrypted on disk (behind FileVault and mode 600) where every process the user runs can read it, and revoking a machine needs its secrets rotated at each provider; the `Stop` hook pushes `docs/` at the end of every turn; the `daily-note` job runs Claude unattended. These are described in the README under [Trust](README.md#trust). If you have found a way to make one of them worse than described, that is in scope — the limit itself is not.
+- Vulnerabilities in the tools this repo installs. Report those upstream: Homebrew, Claude Code, sops, age, rclone, Tailscale, Playwright, Agent Reach.
 - Anything that needs an attacker who is already running code as the user. At that point the machine is theirs.

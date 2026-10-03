@@ -7,6 +7,7 @@ brewfile_layers: [base, dev]
 tailscale_name: example-laptop
 ssh: off # off | tailscale-ssh | openssh-key-only
 managed_by: self # self, or the manager hosts that touch this box
+age_recipient: # managers: this machine's age public key, written by `secrets init`
 updated: 2026-01-01
 ---
 
@@ -55,13 +56,14 @@ User agents in `~/Library/LaunchAgents` and daemons this machine owns, by label.
 Where keys live, never the keys themselves.
 
 - SSH: `~/.ssh/id_ed25519` (this machine only), registered on GitHub as `example-laptop`
-- Secrets: Bitwarden, via `bin/secrets-unlock`
+- Secrets: sops + age — this machine's key at `~/.config/sops/age/keys.txt` (mode 600); its public half is `age_recipient` above
 
 ## Sensitive locations
 
 Paths holding logged-in state or personal data. Never committed, never synced by git, never read into a note or message.
 
 - `~/.config/browse/profiles/` — Playwright Chromium profiles with logged-in sessions (`browse --profile`); mode 700
+- `~/.config/sops/age/` — this machine's age key, which opens every secret in the store (mode 700/600)
 - `~/.agent-reach/` — Agent Reach config; `config.yaml` holds cookies and keys once a login channel is added (mode 600)
 - `~/resources/` — family documents (encrypted in R2)
 - `~/Library/Application Support/MacParakeet/` — meeting recordings and transcripts

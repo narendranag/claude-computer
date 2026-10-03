@@ -20,8 +20,9 @@ Start with this computer. This is a new machine, so run /setup:
    this repo.
 3. Install Tailscale and walk me through logging in. Record the
    Tailscale name in the map.
-4. Install the Bitwarden CLI and walk me through `bw login`. Confirm
-   bin/secrets-unlock works.
+4. Install age and sops and run bin/secrets init (--first on the fleet's
+   first machine, then walk me through the paper backup key). Confirm
+   bin/secrets status.
 5. Link claude-global/ into ~/.claude so the hooks and commands are live.
 6. Install the Brewfile layers for this role, link dotfiles, run
    macos-defaults.sh. Tell me before each step that needs a password or a

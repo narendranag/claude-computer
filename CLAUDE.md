@@ -24,7 +24,7 @@ You are the operator for this user's machines. This repo is the shared brain for
 ## Rules
 
 - **Scripts over prose.** If it is deterministic, it belongs in `bin/`. Slash commands orchestrate scripts; they never reimplement them.
-- **Secrets live only in Bitwarden.** Read them with `bw get`, through `bin/secrets-unlock`. Never write a secret into a file, a commit, the map, or a message.
+- **Secrets live only in `secrets/secrets.yaml`, sops-encrypted.** Scripts read them through `cc_secret`/`cc.secret`; Claude never decrypts. A human writes them with `bin/secrets set`. Never write a secret into any other file, a commit, the map, or a message.
 - **Ask first** before anything destructive (delete, overwrite, force-push, reformat, `rclone sync`/`bisync --resync`), anything that touches credentials, and anything that costs money.
 - **Nothing managed implicitly.** A machine not in `docs/FLEET.md` is out of scope until the user adds it.
 - **Deferred work goes in `TASKS.md` under `## Later`.** Do not lose it in conversation.
@@ -49,7 +49,8 @@ You are the operator for this user's machines. This repo is the shared brain for
 | `.githooks/`                                  | the gitleaks pre-commit scan; enabled with `git config core.hooksPath .githooks`    |
 | `docs/FIRST-PROMPT.md`                        | the prompt a new user pastes                                                        |
 | `docs/DEV-GUIDELINES.md`                      | how every project is built                                                          |
-| `docs/SECRETS.md`                             | every Bitwarden item the scripts expect, and how to get each value                  |
+| `docs/SECRETS.md`                             | every secret the scripts expect, how to get each value, and the age keys            |
+| `secrets/`                                    | the sops-encrypted store (`secrets.yaml`), its example, and the backup key's `.pub` |
 | `docs/FLEET.md`                               | index of machines                                                                   |
 | `docs/DECISIONS.md`                           | append-only decision log                                                            |
 | `docs/TEMPLATE-DECISIONS.md`                  | why the template is built this way; supersede it in `docs/DECISIONS.md`             |

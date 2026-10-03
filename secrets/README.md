@@ -33,6 +33,17 @@ Key names in `secrets.yaml` are plaintext; only the values are encrypted. That i
 
 Removing one: `secrets revoke <host>` on a manager that stays. It drops the host's recipient, re-encrypts, and rotates the data key — then prints every secret that host could read. Git history still holds the old ciphertext, which the old key opens, so **rotate each of those values at its provider** (`/rotate <name>`). Revocation is only as good as that step.
 
+## Client secrets
+
+A credential a client shares with you lives in that client's repo, not in this store: `~/clients/<name>/secrets/secrets.yaml`, a sops file encrypted to the same recipients. Its repo is private (`new-client` makes it so, `security-check` fails it otherwise), and the pre-commit hook it was given refuses plaintext there too. Once, in the client folder:
+
+```bash
+cp ~/claude-computer/.sops.yaml . && mkdir -p secrets && echo '{}' > secrets/secrets.yaml
+sops --config .sops.yaml encrypt -i secrets/secrets.yaml
+```
+
+Then a human sets values with `CC_ROOT="$PWD" CC_SECRETS_FILE="$PWD/secrets/secrets.yaml" secrets set <name>.<field>`, and after the fleet admits or revokes a machine, copies `.sops.yaml` again and runs `sops --config .sops.yaml updatekeys -y secrets/secrets.yaml` there.
+
 ## Headless boxes (designed, not built)
 
 Headless boxes hold no secrets today and have no clone. When the first one needs one:

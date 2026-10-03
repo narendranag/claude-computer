@@ -7,7 +7,7 @@ This repo is a template, not a library. Most people should fork it, change it an
 ```bash
 git clone <your fork> && cd <the clone>
 git config core.hooksPath .githooks   # gitleaks scans every commit; commits fail without it
-brew install gitleaks shellcheck jq   # the three the checks need
+brew install gitleaks shellcheck jq sops age   # what the checks need
 ```
 
 **Your fork is not an instance.** It is public, and it is called `<you>/claude-computer`, which is the name the installer would otherwise use — so it refuses it, and it is right to: an instance holds a map of your machines. If you want to run this for real as well as work on it, create a separate private instance with any other name, at the usual path: `… -- --name sys-admin --dir ~/claude-computer` (the installer asks for the name if you leave `--name` off). To read the template without creating anything, `--public-clone`. [`docs/INSTALL.md`](docs/INSTALL.md#one-repo-for-the-whole-fleet) has the rest.
@@ -19,6 +19,7 @@ shellcheck bin/* lib/*.sh *.sh tests/*.sh .githooks/* claude-global/hooks/*.sh
 bash -n <each of those>
 ./tests/install-dry-run.sh          # install.sh through thirty-seven simulated machines, on stubs
 ./tests/vault-setup.sh              # vault-setup through eight, on stubbed curl and gh
+./tests/secrets.sh                  # bin/secrets on real sops and age, throwaway keys (brew install sops age)
 jq -e . claude-global/settings.json
 ruff check lib docs/diagrams
 ```
@@ -33,7 +34,7 @@ CI (`.github/workflows/ci.yml`) does exactly this on every push. Some `bin/` scr
 
 **`lib/common.sh`.** Source it; use `cc_die`, `cc_need`, `cc_info`, `cc_confirm`, `cc_secret`, `cc_curl` and the `EX_*` exit codes rather than rolling your own. Consistent exit codes are what lets slash commands and hooks react to failures.
 
-**No secret on a command line, ever.** Not in `curl`, not in `security`, not in a URL. `ps` is readable by every process on the machine. `cc_curl` and `cc_session_store` show the pattern.
+**No secret on a command line, ever.** Not in `curl`, not in `security`, not in a URL. `ps` is readable by every process on the machine. `cc_curl` and `cc_sops_set` show the pattern.
 
 **No personal data.** No real hostnames, usernames, email addresses, IP addresses, Tailscale names or chat IDs — in code, in docs, in examples, in test fixtures. Use `example-laptop`, `<person>`, `you@example.com`. `gitleaks` catches keys; it does not catch your home address.
 
@@ -56,7 +57,7 @@ Instances of this template are private and full of one person's machines, so not
 
 - **Other cameras.** `bin/camera-ingest` now reads `CC_CAMERA_EXTS`, but the date and frame-number parsing has only met a handful of bodies. Sidecars, dual-card setups and cameras that name files differently are all open.
 - **Linux.** `lib/common.sh` already branches for it and `bin/schedule` refuses outright. Systemd user timers in place of launchd, and an honest account of what does not translate, would make headless boxes first-class.
-- **Other tools' equivalents.** Not everyone uses Bitwarden, Tailscale, R2, Obsidian or Ghostty. A clean second implementation behind the same script interface — 1Password instead of `bw`, S3 instead of R2 — is more useful than an argument about which is better.
+- **Other tools' equivalents.** Not everyone uses sops, Tailscale, R2, Obsidian or Ghostty. A clean second implementation behind the same script interface — another secret backend behind `cc_secret`, S3 instead of R2 — is more useful than an argument about which is better.
 - **Slash commands and scheduled jobs** you found you needed and the template does not have.
 - **Corrections.** Anywhere the README claims more safety than the code delivers, say so. The "What this does not protect against" paragraph exists because of exactly that kind of note.
 

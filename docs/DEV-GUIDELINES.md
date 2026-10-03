@@ -28,8 +28,8 @@ Python and TypeScript. Nothing else unless a platform forces it (Swift for a Mac
 
 ## Secrets
 
-- Values live in Bitwarden. Locally, `.envrc` (direnv) pulls them with `bw get`; `.env` files are git-ignored.
-- In deploys: `wrangler secret put`, EAS secrets, GitHub Actions secrets — set from Bitwarden, never committed.
+- Values live in the instance's sops store (`docs/SECRETS.md`). Locally, run with `secrets exec --only NAME,… -- <cmd>`, or let `.envrc` (direnv) `eval "$(secrets env --only NAME,…)"`; `.env` files are git-ignored.
+- In deploys: `wrangler secret put`, EAS secrets, GitHub Actions secrets — set from the store under `secrets exec`, never pasted, never committed.
 
 ## Commits
 

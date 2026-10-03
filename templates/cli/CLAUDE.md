@@ -26,8 +26,8 @@ Deviations from DEV-GUIDELINES: _none_
 
 `uv tool install .` locally; PyPI or a private brew tap to share.
 
-Secrets come from Bitwarden (`claude-computer/<name>-*` items) through `.envrc` + direnv, and into deploy targets with the platform's secret command. Never committed.
+Secrets come from the fleet's sops store: `secrets exec --only NAME,… -- <cmd>` locally (or `.envrc` + direnv with `secrets env`), and into deploy targets with the platform's secret command. Never committed, never in a `.env`.
 
 ## Analytics and errors
 
-PostHog (key: Bitwarden `claude-computer/posthog-__NAME__`), unless this project is private/zero-cost, in which case Bugsink on the fleet.
+PostHog (key: `posthog.__NAME__` in the secrets store), unless this project is private/zero-cost, in which case Bugsink on the fleet.
