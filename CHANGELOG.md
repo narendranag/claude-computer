@@ -17,6 +17,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- **The Google OAuth token no longer passes through a command line.** `lib/cc.py`'s `set_note()` handed the base64-encoded token, refresh token included, to `bw create`/`bw edit` as an argument, readable by any process through `ps` — against the repo's own rule. The token now goes to `secrets set` on stdin.
+- **The Google token is refreshed in memory and written back only when Google issues a new refresh token** (or after the first consent), through `secrets set`, which commits. Writing it after every hourly refresh would have committed the store once an hour on every machine, each commit conflicting with the others. `tests/secrets.sh` checks both paths with fake google-auth modules.
 - `Brewfile.dev` installs `cloudflare-wrangler`, Homebrew's name for Wrangler. It listed `brew "wrangler"`, which is not a formula, so `brew bundle --file Brewfile.dev` failed on that line. The command is still `wrangler`.
 
 ## [0.4.0] — 2026-10-03

@@ -6,6 +6,11 @@ secrets store (docs/SECRETS.md):
   google.token         the authorised token (written by the first run)
 
 Nothing is written to disk. First run opens a browser for consent (the human does this).
+
+The access token lasts an hour, so it is refreshed in memory on each run and never stored:
+writing it back would commit the store once an hour on every machine, and every machine's
+commit would conflict with the others'. The token is written back (through `secrets set`,
+which commits) only when Google issues a new refresh token, and after the first consent.
 """
 
 from __future__ import annotations
@@ -36,11 +41,14 @@ def credentials():
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
+        before = creds.refresh_token
         creds.refresh(Request())
-    else:
-        client = json.loads(cc.secret("google", "credentials"))
-        flow = InstalledAppFlow.from_client_config(client, SCOPES)
-        creds = flow.run_local_server(port=0, open_browser=True)
+        if creds.refresh_token and creds.refresh_token != before:
+            cc.set_secret("google", "token", creds.to_json())
+        return creds
+    client = json.loads(cc.secret("google", "credentials"))
+    flow = InstalledAppFlow.from_client_config(client, SCOPES)
+    creds = flow.run_local_server(port=0, open_browser=True)
     cc.set_secret("google", "token", creds.to_json())
     return creds
 

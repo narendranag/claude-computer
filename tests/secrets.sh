@@ -286,6 +286,44 @@ on alpha "$S" revoke alpha
 check_exit 2 "$rc"
 
 # =========================================================================
+if [ -n "${PY:-}" ]; then
+  case_new "Google token: refreshed in memory; written back (and committed) only for a new refresh token"
+  # Fake google-auth modules: an always-expired token whose refresh hands out the refresh token
+  # named in FAKE_NEW_REFRESH (or keeps the old one).
+  F="$WORK/pyfake"
+  mkdir -p "$F/google/auth/transport" "$F/google/oauth2" "$F/google_auth_oauthlib"
+  : > "$F/google/__init__.py"; : > "$F/google/auth/__init__.py"; : > "$F/google/auth/transport/__init__.py"
+  : > "$F/google/oauth2/__init__.py"; : > "$F/google_auth_oauthlib/__init__.py"
+  echo 'class Request: pass' > "$F/google/auth/transport/requests.py"
+  echo 'class InstalledAppFlow: pass' > "$F/google_auth_oauthlib/flow.py"
+  cat > "$F/google/oauth2/credentials.py" <<'PY'
+import json, os
+class Credentials:
+    valid, expired = False, True
+    def __init__(self, info): self.refresh_token = info["refresh_token"]
+    @classmethod
+    def from_authorized_user_info(cls, info, scopes): return cls(info)
+    def refresh(self, request): self.refresh_token = os.environ.get("FAKE_NEW_REFRESH") or self.refresh_token
+    def to_json(self): return json.dumps({"refresh_token": self.refresh_token})
+PY
+  cp "$REPO/lib/google_auth.py" "$INST/lib/"
+  printf '{"refresh_token": "fake-refresh-1"}' > "$WORK/tok.json"
+  on alpha "$S" set google.token --from-file "$WORK/tok.json"
+  c0="$(git -C "$INST" rev-list --count HEAD)"
+  gauth() { on alpha env ${1:+FAKE_NEW_REFRESH="$1"} "$PY" -c 'import sys; sys.path[:0] = sys.argv[1:3]; import google_auth; google_auth.credentials()' "$INST/lib" "$F"; }
+  gauth ""
+  check_exit 0 "$rc"
+  [ "$(git -C "$INST" rev-list --count HEAD)" = "$c0" ] && ok "same refresh token: nothing written, nothing committed" || bad "a refresh with no new token committed"
+  gauth fake-refresh-2
+  check_exit 0 "$rc"
+  [ "$(git -C "$INST" rev-list --count HEAD)" = "$((c0 + 1))" ] && ok "new refresh token: one commit" || bad "new refresh token not committed"
+  git -C "$INST" log -1 --format=%s | grep -qx '\[alpha\] secrets: set google.token' && ok "commit [alpha] secrets: set google.token" || bad "commit subject"
+  get alpha google token
+  grep -q fake-refresh-2 "$OUT" && ok "store holds the new refresh token" || bad "store not updated"
+  lacks "$STORE" "fake-refresh-2"
+fi
+
+# =========================================================================
 case_new "no value is ever an argument: every sops and jq call logged"
 mkdir -p "$WORK/argvlog"
 for t in sops jq; do
