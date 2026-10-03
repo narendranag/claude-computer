@@ -1,0 +1,30 @@
+onboarding = false
+# herdr — linked to ~/.config/herdr/config.toml. Every Ghostty window runs `herdr` (one persistent
+# session); Ghostty's ⌘ shortcuts send herdr's prefix sequences — see dotfiles/ghostty.config.
+# Full defaults: `herdr --default-config`. Check after editing: `herdr config check`.
+
+[theme]
+name = "solarized"          # matches Ghostty's iTerm2 Solarized Dark
+
+# Sidebar one step lighter than the panes (Solarized base02 vs base03), so it reads as its own panel
+[theme.custom]
+sidebar_bg = "#073642"
+active_row_bg = "#0e4b5a"
+panel_bg = "#002b36"
+
+[update]
+version_check = false       # Homebrew updates herdr
+
+[keys]
+# prefix stays ctrl+b — Ghostty's ⌘ shortcuts depend on it
+clear_pane = "prefix+ctrl+k"   # ⌘K in Ghostty
+
+[keys.indexed]
+agents = "alt"              # ⌥1..9 jumps straight to an agent row in the sidebar
+
+[ui]
+prompt_new_tab_name = false # ⌘T opens a tab at once
+status_indicators = "symbols"
+
+[ui.toast]
+delivery = "system"         # macOS notification when an agent is done or needs you

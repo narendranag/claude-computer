@@ -1,21 +1,80 @@
-# ~/.config/starship.toml — linked from ~/claude-computer/dotfiles/starship.toml
-add_newline = false
-format = "$hostname$directory$git_branch$git_status$python$nodejs$cmd_duration$line_break$character"
+"$schema" = "https://starship.rs/config-schema.json"
+# powerlevel10k "rainbow" look-alike: two lines, frame, rounded segments; exit status / duration /
+# versions / clock on the right of line 1 — plus the machine name. Short segments and a shortened
+# path so line 1 fits a herdr pane.
+# Icons are Nerd Font glyphs (private-use code points); edit them with care.
+
+add_newline = true
+# Segments are kept short and the path is shortened so line 1 fits a herdr pane beside the sidebar.
+format = """
+[╭─](fg:244)$os$hostname$directory$git_branch$git_status\
+$fill\
+$status$cmd_duration$jobs$nodejs$python$time[─╮](fg:244)
+[╰─](fg:244)$character"""
+right_format = "[─╯](fg:244)"
+
+[fill]
+symbol = "·"
+style = "fg:240"
+
+[os]
+disabled = false
+format = "[$symbol](fg:white)"
+[os.symbols]
+Macos = " "
+Linux = " "
+Raspbian = " "
+Ubuntu = " "
+Debian = " "
 
 [hostname]
-ssh_only = false          # always show the machine: this setup manages a fleet
-format = "[$hostname]($style) "
-style = "bold dimmed"
+ssh_only = true                  # on air you know where you are; shown when SSHed into another box
+format = "[](fg:cyan)[ $hostname ](bg:cyan fg:black)[](fg:cyan) "
 
 [directory]
-truncation_length = 3
-truncate_to_repo = true
+truncation_length = 2            # at most two folders…
+truncate_to_repo = true          # …counted from the repo root inside a repo
+truncation_symbol = "…/"
+read_only = " "
+format = "[](fg:blue)[  $path](bg:blue fg:black)[$read_only](bg:blue fg:red)[ ](bg:blue)[](fg:blue) "
+
+[git_branch]
+symbol = " "
+format = "[](fg:green)[ $symbol$branch ](bg:green fg:black)[](fg:green) "
+
+[git_status]
+format = "([](fg:yellow)[ $all_status$ahead_behind ](bg:yellow fg:black)[](fg:yellow) )"
+
+[status]
+disabled = false
+success_symbol = "✔"
+symbol = "✘ "
+format = "[](fg:black)[ $symbol$common_meaning$signal_name$maybe_int ](bg:black fg:$style)[](fg:black)"
+success_style = "green"
+failure_style = "red"
+recognize_signal_code = true
+map_symbol = false
 
 [cmd_duration]
-min_time = 5_000
+min_time = 3_000
+format = "[](fg:yellow)[ $duration ](bg:yellow fg:black)[](fg:yellow)"
 
-[python]
-format = "[py $version]($style) "
+[jobs]
+format = "[](fg:cyan)[ $symbol$number ](bg:cyan fg:black)[](fg:cyan)"
 
 [nodejs]
-format = "[node $version]($style) "
+version_format = "${major}"
+format = "[](fg:green)[  $version ](bg:green fg:black)[](fg:green) "
+
+[python]
+version_format = "${major}.${minor}"
+format = "[](fg:yellow)[  ${version}( \\($virtualenv\\)) ](bg:yellow fg:black)[](fg:yellow) "
+
+[time]
+disabled = false
+time_format = "%H:%M"
+format = "[](fg:white)[ $time  ](bg:white fg:black)[](fg:white)"
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"

@@ -30,7 +30,8 @@ brew "uv"                               # Python packages and scripts
 brew "pnpm"                             # JS packages
 
 # --- For you at the terminal — Claude doesn't use these ---------------------
-brew "starship"                         # prompt
+brew "starship"                         # prompt (dotfiles/starship.toml)
+brew "herdr"                            # agent workspaces: every Ghostty window attaches to one session
 brew "zsh-autosuggestions"
 brew "zsh-syntax-highlighting"
 brew "fzf"                              # fuzzy finder
@@ -70,6 +71,6 @@ cask "telegram"
 cask "iina"
 cask "libreoffice"                      # headless document conversion as a build tool
 cask "macparakeet" if Hardware::CPU.arm? # on-device dictation + transcription → vault inbox; Apple silicon, macOS 14+
-cask "font-jetbrains-mono-nerd-font"
+cask "font-meslo-lg-nerd-font"
 cask "qlmarkdown"                       # Quick Look: markdown
 cask "syntax-highlight"                 # Quick Look: source code
