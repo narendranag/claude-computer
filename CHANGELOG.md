@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Fixed
+
+- `Brewfile.dev` installs `cloudflare-wrangler`, Homebrew's name for Wrangler. It listed `brew "wrangler"`, which is not a formula, so `brew bundle --file Brewfile.dev` failed on that line. The command is still `wrangler`.
+
 ## [0.4.0] — 2026-10-03
 
 Clients get their own repos, Claude gets one search tool and quieter output, and Syncthing leaves.

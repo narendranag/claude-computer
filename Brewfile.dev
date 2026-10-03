@@ -6,7 +6,7 @@ cask "orbstack"                         # Docker for Python services and self-ho
 cask "darktable"                        # RAW processing (library/camera brain)
 cask "calibre"                          # books and comics libraries
 
-brew "wrangler"                         # Cloudflare Workers, D1, R2, DNS
+brew "cloudflare-wrangler"              # Cloudflare Workers, D1, R2, DNS
 brew "biome"
 brew "ruff"
 brew "pyright"
