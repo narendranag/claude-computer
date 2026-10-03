@@ -9,7 +9,10 @@
 # Checks: FileVault / disk encryption · firewall · sshd state matches the machine's role ·
 #         password SSH disabled wherever sshd runs · browse profiles private ·
 #         Agent Reach's config (cookies, keys) private ·
-#         the vault's and every client repo's GitHub remote is not public · Tailscale up.
+#         the vault's and every client repo's GitHub remote is not public ·
+#         age key private (mode 600, dir 700, outside any repo, holds only this machine's key) ·
+#         every value in the secrets store encrypted · this instance's own remote private ·
+#         Tailscale up.
 #
 # Self-contained on purpose (no lib/ sourcing) so it can be piped to a box over SSH.
 # Output: one line per check, "PASS|FAIL|SKIP <check> — <detail>", prefixed with [<host>].
@@ -206,6 +209,93 @@ elif [ -n "$unknown" ]; then
   report SKIP client-remotes "could not read visibility of:$unknown"
 else
   report PASS client-remotes "$found client repos, none public"
+fi
+
+# --- The age key: private, outside any repo, and only this machine's ---------
+# The key file is the credential for every secret, unencrypted at rest except by FileVault.
+# The paper backup key's private half belongs on paper: on disk it is one more copy to lose.
+repo="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)"
+agekey="${SOPS_AGE_KEY_FILE:-$HOME/.config/sops/age/keys.txt}"
+fmode() { if [ "$os" = "Darwin" ]; then stat -f '%Lp' "$1"; else stat -c '%a' "$1"; fi; }
+if [ ! -f "$agekey" ]; then
+  report SKIP age-key "no age key on this machine"
+else
+  problems=""
+  [ "$(fmode "$agekey")" = "600" ] || problems="$problems; $agekey is mode $(fmode "$agekey"), expected 600"
+  [ "$(fmode "$(dirname "$agekey")")" = "700" ] || problems="$problems; $(dirname "$agekey") is mode $(fmode "$(dirname "$agekey")"), expected 700"
+  if git -C "$(dirname "$agekey")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    problems="$problems; it is inside a git work tree"
+  fi
+  n="$(grep -c '^AGE-SECRET-KEY-' "$agekey" 2>/dev/null || true)"
+  [ "${n:-0}" -le 1 ] || problems="$problems; it holds $n keys — the paper backup key belongs on paper only"
+  if [ -f "$repo/secrets/backup.pub" ] && command -v age-keygen >/dev/null 2>&1; then
+    bp="$(grep -m1 '^age1' "$repo/secrets/backup.pub" 2>/dev/null || true)"
+    if [ -n "$bp" ] && age-keygen -y "$agekey" 2>/dev/null | grep -qxF "$bp"; then
+      problems="$problems; it is the paper backup key — that belongs on paper only"
+    fi
+  fi
+  if [ -d "$repo/.git" ] && git -C "$repo" grep -qE 'AGE-SECRET-KEY-1[0-9A-Z]{58}' 2>/dev/null; then
+    problems="$problems; an age private key is committed in $repo"
+  fi
+  if [ -n "$problems" ]; then
+    report FAIL age-key "${problems#; }"
+  else
+    report PASS age-key "mode 600, outside any repo, one key"
+  fi
+fi
+
+# --- Every value in the secrets store is encrypted -----------------------------
+# Key names are plaintext in a sops file; values must all be ENC[…] (sops leaves "" as is).
+stores=""
+for f in "$repo/secrets/secrets.yaml" "$repo"/secrets/hosts/*.yaml; do [ -f "$f" ] && stores="$stores $f"; done
+if [ -z "$stores" ]; then
+  report SKIP secrets-encrypted "no secrets store in $repo"
+else
+  plain=""
+  for f in $stores; do
+    grep -q '^sops:' "$f" || { plain="$plain ${f#"$repo"/}(not a sops file)"; continue; }
+    # name.field of each value that is neither ENC[…] nor empty; mirrors cc_secrets_list in lib/common.sh
+    bad="$(awk '
+      /^[[:space:]]*(#|$)/ {next}
+      /^[^[:space:]]/ {top = $0; sub(/:.*/, "", top); ind = 0
+        v = $0; sub(/^[^:]*:[ ]*/, "", v); sub(/[ ]+#.*$/, "", v)
+        if (top != "sops" && v != "" && v != "{}" && v !~ /^ENC\[/) print top; next}
+      top == "sops" {next}
+      {match($0, /^[ ]+/); cur = RLENGTH; if (ind == 0) ind = cur
+        if (cur > ind) {print top ".(nested)"; next}
+        line = substr($0, cur + 1); k = line; sub(/:.*/, "", k)
+        v = line; sub(/^[^:]*:[ ]*/, "", v); sub(/[ ]+#.*$/, "", v)
+        if (v !~ /^ENC\[/ && v != "" && v != "\"\"") print top "." k}' "$f" | sort -u | tr '\n' ' ')"
+    [ -z "$bad" ] || plain="$plain ${f#"$repo"/}: $bad"
+  done
+  if [ -n "$plain" ]; then
+    report FAIL secrets-encrypted "plaintext in the store:$plain"
+  else
+    report PASS secrets-encrypted "every value is ENC[…]"
+  fi
+fi
+
+# --- This instance's own remote must be private ---------------------------------
+# The instance holds the machine map and, once secrets/ is in use, the encrypted store, whose key
+# names say which services you use. The public template (marked by .template) is exempt.
+if [ ! -d "$repo/.git" ] && ! git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  report SKIP instance-remote "not run from inside the instance"
+elif [ -f "$repo/.template" ]; then
+  report SKIP instance-remote "this is the public template"
+else
+  origin="$(git -C "$repo" remote get-url origin 2>/dev/null || true)"
+  if [ -z "$origin" ]; then
+    report PASS instance-remote "local only, no remote"
+  elif ! command -v gh >/dev/null 2>&1; then
+    report SKIP instance-remote "gh not installed, cannot read $origin's visibility"
+  else
+    slug="$(printf '%s' "$origin" | sed -e 's#^.*github\.com[:/]##' -e 's#\.git$##')"
+    case "$(gh repo view "$slug" --json visibility --jq .visibility 2>/dev/null || true)" in
+      PUBLIC)            report FAIL instance-remote "$slug is PUBLIC — your machine map and secret names are on the open internet" ;;
+      PRIVATE|INTERNAL)  report PASS instance-remote "$slug is private" ;;
+      *)                 report SKIP instance-remote "could not read visibility of $slug" ;;
+    esac
+  fi
 fi
 
 # --- Tailscale -------------------------------------------------------------

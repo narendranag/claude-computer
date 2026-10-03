@@ -15,6 +15,9 @@ Compares, for this host:
                RIPGREP_CONFIG_PATH pointing at it — otherwise every agent's `rg` runs unconfigured
   agent-reach  installed from the commit pinned in setup-tools.sh, yt-dlp and mcporter on PATH, the skill
                in ~/.claude/skills, and `agent-reach doctor --json` for the zero-config channels
+  secrets      this machine's age key matches the age_recipient in its machine file, .sops.yaml matches
+               the machine files and secrets/backup.pub, and the store is encrypted to exactly those
+               (no `secrets admit`/`revoke` pending) — names and metadata only, nothing is decrypted
 then runs bin/security-check.
 
 "missing" = recorded but not present. "unrecorded" = present but not in the map.
@@ -22,7 +25,7 @@ Map bullets may be globs (`com.google.*`) to accept a vendor's helpers in one li
 Either is drift: fix the machine or fix the map, in the same session.
 
 Usage:
-  map-check [--host NAME] [--only brew,vscode,launchd,ports,macparakeet,ripgrep,agent-reach,security]
+  map-check [--host NAME] [--only brew,vscode,launchd,ports,macparakeet,ripgrep,agent-reach,secrets,security]
 
 Exit codes: 0 no drift · 1 drift or a security FAIL · 2 usage · 5 no machine file
 """
@@ -41,7 +44,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LAYER_FILES = {"base": "Brewfile", "dev": "Brewfile.dev", "server": "Brewfile.server"}
-CHECKS = ("brew", "vscode", "launchd", "ports", "macparakeet", "ripgrep", "agent-reach", "security")
+CHECKS = ("brew", "vscode", "launchd", "ports", "macparakeet", "ripgrep", "agent-reach", "secrets", "security")
 # The channels setup-tools.sh installs. doctor reports github and exa_search as "warn" when they
 # are configured, because it won't make the live call that would prove them; that is not drift.
 AGENT_REACH_CORE = ("web", "youtube", "rss", "github", "exa_search")
@@ -273,6 +276,31 @@ def check_agent_reach() -> list[str]:
     return out
 
 
+def check_secrets(fm: dict[str, str | list[str]]) -> list[str]:
+    store = ROOT / "secrets" / "secrets.yaml"
+    if not store.is_file() and not (ROOT / ".sops.yaml").is_file():
+        return []  # this instance doesn't use the store yet
+    key = Path(os.environ.get("SOPS_AGE_KEY_FILE") or Path.home() / ".config/sops/age/keys.txt")
+    recorded = str(fm.get("age_recipient") or "").strip("\"'")
+    out = []
+    if not key.is_file():
+        if recorded or fm.get("kind") == "manager":
+            out.append(f"no age key at {key} (secrets init)")
+    elif not shutil.which("age-keygen"):
+        out.append("age-keygen not installed (brew install age)")
+    else:
+        derived = run(["age-keygen", "-y", str(key)]).strip()
+        if not recorded:
+            out.append("age key present but no age_recipient in the machine file (secrets init)")
+        elif derived != recorded:
+            out.append("age_recipient in the machine file is not this machine's key (secrets init)")
+    rc = subprocess.run([str(ROOT / "bin" / "secrets"), "recipients", "--check"], capture_output=True, text=True, check=False)
+    if rc.returncode != 0:
+        out += [line.strip() for line in rc.stdout.splitlines() if "—" in line and ("out of date" in line or "different" in line)]
+        out += [line.strip() for line in rc.stderr.splitlines() if line.strip()]
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("-h", "--help", action="store_true")
@@ -307,6 +335,7 @@ def main() -> int:
         "macparakeet": check_macparakeet,
         "ripgrep": check_ripgrep,
         "agent-reach": check_agent_reach,
+        "secrets": lambda: check_secrets(fm),
     }
     print(f"[{host}] map-check against docs/machines/{host}.md")
     for name in only:

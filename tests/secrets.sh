@@ -343,6 +343,48 @@ lacks "$WORK/argv.log" "fake-argv-0004"
 lacks "$WORK/argv.log" "fake-argv-0005"
 
 # =========================================================================
+case_new "security-check: age-key, secrets-encrypted, instance-remote"
+cp "$REPO/bin/security-check" "$INST/bin/"
+sec() { on alpha "$INST/bin/security-check"; grep -E " (age-key|secrets-encrypted|instance-remote) " "$OUT" > "$WORK/sec.txt"; }
+sec
+contains "$WORK/sec.txt" "PASS age-key"
+contains "$WORK/sec.txt" "PASS secrets-encrypted"
+contains "$WORK/sec.txt" "PASS instance-remote — local only"
+chmod 644 "$KA"
+sec
+contains "$WORK/sec.txt" "FAIL age-key — $KA is mode 644"
+chmod 600 "$KA"
+cp "$STORE" "$WORK/store.bak"
+cat "$WORK/plain.yaml" "$WORK/store.bak" > "$STORE"
+sec
+contains "$WORK/sec.txt" "FAIL secrets-encrypted — plaintext in the store: secrets/secrets.yaml: leaked.api_key"
+lacks "$WORK/sec.txt" "plaintext-value"
+cp "$WORK/store.bak" "$STORE"
+cat "$KA" > "$WORK/twokeys"; age-keygen 2>/dev/null >> "$WORK/twokeys"; cp "$KA" "$WORK/ka.bak"; cp "$WORK/twokeys" "$KA"
+sec
+contains "$WORK/sec.txt" "holds 2 keys"
+cp "$WORK/ka.bak" "$KA"
+touch "$INST/.template"
+sec
+contains "$WORK/sec.txt" "SKIP instance-remote — this is the public template"
+rm "$INST/.template"
+
+if [ -n "${PY:-}" ]; then
+  case_new "map-check secrets: recipient, .sops.yaml and the store agree"
+  cp "$REPO/bin/map-check" "$INST/bin/"
+  on alpha "$PY" "$INST/bin/map-check" --only secrets
+  check_exit 0 "$rc"
+  contains "$OUT" "## secrets: ok"
+  cp "$INST/docs/machines/alpha.md" "$WORK/alpha.bak"
+  sed -e 's/^age_recipient: .*/age_recipient: age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/' "$WORK/alpha.bak" > "$INST/docs/machines/alpha.md"
+  on alpha "$PY" "$INST/bin/map-check" --only secrets
+  check_exit 1 "$rc"
+  contains "$OUT" "not this machine's key"
+  contains "$OUT" ".sops.yaml: out of date"
+  cp "$WORK/alpha.bak" "$INST/docs/machines/alpha.md"
+fi
+
+# =========================================================================
 case_new "push is designed, not built"
 on alpha "$S" push some-box
 check_exit 5 "$rc"
