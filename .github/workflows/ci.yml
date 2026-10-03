@@ -76,8 +76,9 @@ jobs:
       - name: library-push matrix
         run: ./tests/library-push.sh
 
-      # setup-tools.sh --only vscode; `code` is a stub, so no real extension is ever installed.
-      - name: setup-tools.sh vscode dry-run and failure matrix
+      # setup-tools.sh --only vscode and --only agent-reach; `code`, `uv` and `npm` are stubs,
+      # so nothing is ever installed.
+      - name: setup-tools.sh dry-run and failure matrix
         run: ./tests/setup-tools-dry-run.sh
 
       - name: --help works

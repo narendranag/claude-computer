@@ -1,5 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "PAGER": "cat",
+    "GIT_PAGER": "cat",
+    "GH_PAGER": "cat",
+    "NO_COLOR": "1"
+  },
   "permissions": {
     "defaultMode": "auto",
     "allow": [
@@ -50,6 +56,7 @@
       "Bash(secrets-unlock --status)",
       "Bash(archive-pull --search:*)",
       "Bash(browse:*)",
+      "Bash(agent-reach doctor:*)",
       "Bash(~/claude-computer/bin/browse:*)",
       "Bash(vault-setup)",
       "Bash(vault-setup --dry-run)",
@@ -68,6 +75,13 @@
       "Bash(~/claude-computer/bin/library-push:*)",
       "Bash(~/claude-computer/bin/new-app:*)",
       "Bash(sudo:*)",
+      "Bash(rg --pre*)",
+      "Bash(rg * --pre*)",
+      "Bash(rg --hostname-bin*)",
+      "Bash(rg * --hostname-bin*)",
+      "Bash(agent-reach install:*)",
+      "Bash(agent-reach configure:*)",
+      "Bash(agent-reach uninstall:*)",
       "Bash(archive-push:*)",
       "Bash(resources-sync:*)",
       "Bash(library-push:*)",
@@ -94,6 +108,7 @@
       "Read(**/.env.*)",
       "Read(~/.config/rclone/rclone.conf)",
       "Read(~/.config/browse/profiles/**)",
+      "Read(~/.agent-reach/config.yaml)",
       "Read(~/Library/Keychains/**)"
     ]
   },

@@ -17,6 +17,7 @@ brew "sops"                             # optional: encrypted config files
 # --- Claude works better with these ----------------------------------------
 brew "ripgrep"
 brew "fd"
+brew "ast-grep"                         # structural code search: matches syntax, not text
 brew "fzf"
 brew "jq"
 brew "yq"

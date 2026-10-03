@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/setup-tools-dry-run.sh — drive setup-tools.sh --only vscode with a stubbed `code`.
+# tests/setup-tools-dry-run.sh — drive setup-tools.sh --only vscode and --only agent-reach with stubs.
 #
 # Usage: ./tests/setup-tools-dry-run.sh
 #
@@ -11,7 +11,9 @@
 # Cases: (i) --dry-run prints the command that would run for each extension not already
 # installed, and a "N already installed" summary, and never calls --install-extension ·
 # (ii) a real (stubbed) run with one failing extension prints a per-extension result, a
-# final summary, and exits non-zero.
+# final summary, and exits non-zero · (iii) --only agent-reach --dry-run prints the pinned
+# commit install and the zero-config `install --system`, with no --channels, and runs
+# nothing · (iv) without npm or mise the step fails before installing anything.
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -111,6 +113,30 @@ contains "$OUT" "installed: anthropic.claude-code"
 contains "$OUT" "failed: biomejs.biome"
 contains "$LOG" "code --install-extension biomejs.biome"
 contains "$OUT" "failed, 2 already installed"
+
+# =========================================================================
+case_new "agent-reach --dry-run: pinned commit, zero-config install, nothing runs"
+stub "$BIN" uv < /dev/null
+stub "$BIN" npm < /dev/null
+run --dry-run --only agent-reach
+check_exit 0 "$rc"
+pin="$(sed -n 's/^AGENT_REACH_COMMIT="\([0-9a-f]*\)".*/\1/p' "$SCRIPT")"
+if [ "${#pin}" -eq 40 ]; then ok "pin is a full commit: $pin"; else bad "AGENT_REACH_COMMIT is not a 40-character commit: '$pin'"; fi
+contains "$OUT" "uv tool install --force https://github.com/Panniantong/agent-reach/archive/$pin.zip"
+contains "$OUT" "mkdir -p $HOME/.claude/skills"
+contains "$OUT" "uv tool install yt-dlp[default]"
+contains "$OUT" "agent-reach install --env=auto --system"
+if grep -qF -- "--channels" "$OUT"; then bad "dry run passes --channels"; else ok "no --channels"; fi
+if grep -qF -- "archive/main" "$OUT"; then bad "installs from main"; else ok "never installs from main"; fi
+log_lacks "$LOG" "uv tool install"
+
+# =========================================================================
+case_new "agent-reach without npm or mise: fails before installing anything"
+stub "$BIN" uv < /dev/null
+run --only agent-reach
+check_exit 1 "$rc"
+contains "$OUT" "npm missing"
+log_lacks "$LOG" "uv tool install"
 
 # =========================================================================
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

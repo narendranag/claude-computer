@@ -34,9 +34,10 @@ for p in zsh-autosuggestions zsh-syntax-highlighting; do
 done
 
 # --- Aliases -----------------------------------------------------------------
-alias ls='eza --group-directories-first'
+# Never alias a standard command name (ls, cat, grep, find, cd). Claude Code copies these
+# aliases into its own shell, where a model types `ls -lt` or `cat -A` and expects the real
+# tool: eza and bat read those flags differently, or fail. New names only.
 alias ll='eza -l --git --group-directories-first'
-alias cat='bat --paging=never --style=plain'
 alias lg='lazygit'
 alias cchome='cd "$CC_HOME"'
 alias unlock='eval "$(secrets-unlock --export)"'

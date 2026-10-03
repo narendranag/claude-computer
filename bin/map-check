@@ -11,6 +11,10 @@ Compares, for this host:
   launchd    non-Apple plists in LaunchAgents/LaunchDaemons vs "## launchd jobs (checked)"
   ports      non-loopback TCP listeners vs "## Listening ports (checked)"
   macparakeet  `macparakeet-cli health --json`: database ok, Parakeet v3 downloaded (only if the app is installed)
+  ripgrep      ~/.config/ripgrep/ripgreprc matches dotfiles/ripgreprc, and a non-interactive zsh has
+               RIPGREP_CONFIG_PATH pointing at it — otherwise every agent's `rg` runs unconfigured
+  agent-reach  installed from the commit pinned in setup-tools.sh, yt-dlp and mcporter on PATH, the skill
+               in ~/.claude/skills, and `agent-reach doctor --json` for the zero-config channels
 then runs bin/security-check.
 
 "missing" = recorded but not present. "unrecorded" = present but not in the map.
@@ -18,7 +22,7 @@ Map bullets may be globs (`com.google.*`) to accept a vendor's helpers in one li
 Either is drift: fix the machine or fix the map, in the same session.
 
 Usage:
-  map-check [--host NAME] [--only brew,vscode,launchd,ports,macparakeet,security]
+  map-check [--host NAME] [--only brew,vscode,launchd,ports,macparakeet,ripgrep,agent-reach,security]
 
 Exit codes: 0 no drift · 1 drift or a security FAIL · 2 usage · 5 no machine file
 """
@@ -27,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import re
 import shutil
 import socket
@@ -36,14 +41,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LAYER_FILES = {"base": "Brewfile", "dev": "Brewfile.dev", "server": "Brewfile.server"}
-CHECKS = ("brew", "vscode", "launchd", "ports", "macparakeet", "security")
+CHECKS = ("brew", "vscode", "launchd", "ports", "macparakeet", "ripgrep", "agent-reach", "security")
+# The channels setup-tools.sh installs. doctor reports github and exa_search as "warn" when they
+# are configured, because it won't make the live call that would prove them; that is not drift.
+AGENT_REACH_CORE = ("web", "youtube", "rss", "github", "exa_search")
 MACPARAKEET_CLI = "/Applications/MacParakeet.app/Contents/MacOS/macparakeet-cli"
 BREW_LINE = re.compile(r'^\s*(brew|cask|mas)\s+"([^"]+)"')
 
 
-def run(cmd: list[str]) -> str:
+def run(cmd: list[str], env: dict[str, str] | None = None) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False).stdout
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False, env=env).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
@@ -212,6 +220,59 @@ def check_macparakeet() -> list[str]:
     return out
 
 
+def check_ripgrep() -> list[str]:
+    if not shutil.which("rg"):
+        return []  # check_brew reports a missing ripgrep
+    src = ROOT / "dotfiles" / "ripgreprc"
+    dst = Path.home() / ".config" / "ripgrep" / "ripgreprc"
+    out = []
+    if not dst.is_file():
+        out.append("~/.config/ripgrep/ripgreprc missing (link dotfiles/ripgreprc)")
+    elif src.is_file() and dst.read_text() != src.read_text():
+        out.append("~/.config/ripgrep/ripgreprc differs from dotfiles/ripgreprc")
+    # Ask a non-interactive zsh, the kind an agent's shell tool starts: ~/.zshrc is not read there.
+    # Drop the variable first, or a caller that already exports it would hide a missing ~/.zshenv.
+    if shutil.which("zsh"):
+        env = {k: v for k, v in os.environ.items() if k != "RIPGREP_CONFIG_PATH"}
+        seen = run(["zsh", "-c", "print -r -- ${RIPGREP_CONFIG_PATH-}"], env=env).strip()
+        if seen != str(dst):
+            out.append(f"RIPGREP_CONFIG_PATH is {seen or 'unset'} in a non-interactive zsh (link dotfiles/zshenv to ~/.zshenv)")
+    return out
+
+
+def check_agent_reach() -> list[str]:
+    import json
+
+    fix = "setup-tools.sh --only agent-reach"
+    # launchd runs this with a short PATH: uv tools live in ~/.local/bin, and mcporter is an npm
+    # global, which under mise is only reachable through its shims.
+    extra = [str(Path.home() / ".local/bin"), str(Path.home() / ".local/share/mise/shims")]
+    path = os.pathsep.join([os.environ.get("PATH", ""), *extra])
+    env = {**os.environ, "PATH": path}
+    cli = shutil.which("agent-reach", path=path)
+    if not cli:
+        return [f"not installed ({fix})"]
+    out = []
+    pin = re.search(r'^AGENT_REACH_COMMIT="([0-9a-f]{40})"', (ROOT / "setup-tools.sh").read_text(), re.M)
+    # Upstream's version string does not change between commits, so read what uv installed from.
+    receipt = Path(run(["uv", "tool", "dir"]).strip() or Path.home() / ".local/share/uv/tools") / "agent-reach/uv-receipt.toml"
+    source = re.search(r'url = "([^"]+)"', receipt.read_text()) if receipt.is_file() else None
+    if pin and (not source or pin.group(1) not in source.group(1)):
+        out.append(f"not installed from the pinned commit {pin.group(1)[:7]} ({fix})")
+    out += [f"{tool} not on PATH ({fix})" for tool in ("yt-dlp", "mcporter") if not shutil.which(tool, path=path)]
+    if not (Path.home() / ".claude/skills/agent-reach/SKILL.md").is_file():
+        out.append("skill missing from ~/.claude/skills/agent-reach (agent-reach skill --install)")
+    try:
+        channels = json.loads(run([cli, "doctor", "--json"], env=env) or "{}")
+    except json.JSONDecodeError:
+        return out + ["doctor --json returned no JSON"]
+    for name in AGENT_REACH_CORE:
+        status = (channels.get(name) or {}).get("status", "unknown")
+        if status not in ("ok", "warn"):
+            out.append(f"{name}: {status}")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("-h", "--help", action="store_true")
@@ -244,6 +305,8 @@ def main() -> int:
         "launchd": lambda: check_launchd(text),
         "ports": lambda: check_ports(text),
         "macparakeet": check_macparakeet,
+        "ripgrep": check_ripgrep,
+        "agent-reach": check_agent_reach,
     }
     print(f"[{host}] map-check against docs/machines/{host}.md")
     for name in only:

@@ -41,7 +41,7 @@ You are the operator for this user's machines. This repo is the shared brain for
 | `Brewfile`, `Brewfile.dev`, `Brewfile.server` | packages, layered by role                                                           |
 | `install.sh`                                  | the one-liner that puts the operator on a new Mac; `docs/INSTALL.md` explains it    |
 | `tests/`                                      | what CI runs beyond shellcheck — `install-dry-run.sh` drives `install.sh --dry-run` |
-| `setup-tools.sh`                              | what Homebrew cannot install — oh-my-zsh, runtimes, Playwright, VS Code extensions  |
+| `setup-tools.sh`                              | what Homebrew can't install — runtimes, Playwright, Agent Reach, VS Code extensions |
 | `vscode-extensions.txt`                       | the extension list `setup-tools.sh vscode` installs, and `map-check` diffs          |
 | `dotfiles/`                                   | shell, prompt, terminal, git — linked by `/setup`                                   |
 | `macos-defaults.sh`                           | `defaults write` for a new Mac                                                      |

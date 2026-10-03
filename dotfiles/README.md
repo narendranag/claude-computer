@@ -5,6 +5,8 @@ Linked by `/setup`. Existing files are moved to `<name>.backup-<date>` first.
 | File here          | Linked to                                                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
 | `zshrc`            | `~/.zshrc`                                                                                                            |
+| `zshenv`           | `~/.zshenv` — read by every zsh, not only interactive ones; sets `RIPGREP_CONFIG_PATH`                                |
+| `ripgreprc`        | `~/.config/ripgrep/ripgreprc` — caps the length of each line `rg` prints                                              |
 | `starship.toml`    | `~/.config/starship.toml`                                                                                             |
 | `ghostty.config`   | `~/.config/ghostty/config.ghostty` (current name; plain `config` still loads)                                         |
 | `gitconfig`        | `~/.gitconfig` — **copied** in `/setup` phase 0, not linked: `{{git_name}}` and `{{git_email}}` are filled with yours |

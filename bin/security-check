@@ -8,6 +8,7 @@
 #
 # Checks: FileVault / disk encryption · firewall · sshd state matches the machine's role ·
 #         password SSH disabled wherever sshd runs · browse profiles private ·
+#         Agent Reach's config (cookies, keys) private ·
 #         the vault's GitHub remote is not public · Tailscale up.
 #
 # Self-contained on purpose (no lib/ sourcing) so it can be piped to a box over SSH.
@@ -138,6 +139,21 @@ else
     report FAIL browse-profiles "$prof is inside a git work tree"
   else
     report PASS browse-profiles "private, outside any repo"
+  fi
+fi
+
+# --- Agent Reach config (cookies and keys, if the human added a channel) ------
+arc="$HOME/.agent-reach/config.yaml"
+if [ ! -f "$arc" ]; then
+  report SKIP agent-reach-config "none"
+else
+  if [ "$os" = "Darwin" ]; then mode="$(stat -f '%Lp' "$arc")"; else mode="$(stat -c '%a' "$arc")"; fi
+  if [ "$mode" != "600" ]; then
+    report FAIL agent-reach-config "$arc is mode $mode, expected 600"
+  elif git -C "$HOME/.agent-reach" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    report FAIL agent-reach-config "$HOME/.agent-reach is inside a git work tree"
+  else
+    report PASS agent-reach-config "private, outside any repo"
   fi
 fi
 

@@ -62,6 +62,7 @@ Where keys live, never the keys themselves.
 Paths holding logged-in state or personal data. Never committed, never synced by git, never read into a note or message.
 
 - `~/.config/browse/profiles/` — Playwright Chromium profiles with logged-in sessions (`browse --profile`); mode 700
+- `~/.agent-reach/` — Agent Reach config; `config.yaml` holds cookies and keys once a login channel is added (mode 600)
 - `~/resources/` — family documents (encrypted in R2)
 - `~/Library/Application Support/MacParakeet/` — meeting recordings and transcripts
 

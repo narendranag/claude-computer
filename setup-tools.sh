@@ -2,13 +2,17 @@
 # setup-tools.sh — the tools Homebrew can't install. Run by /setup right after `brew bundle`.
 #
 # Usage: ./setup-tools.sh [--dry-run] [--only NAME[,NAME…]]
-#   names: oh-my-zsh, runtimes, playwright, macparakeet, vscode, autoupdate
+#   names: oh-my-zsh, runtimes, playwright, agent-reach, macparakeet, vscode, autoupdate
 #
 #   oh-my-zsh    curl installer, keeping the linked ~/.zshrc
 #   runtimes     mise → Python + Node LTS (uv and pnpm come from the Brewfile)
 #   playwright   Playwright CLI (uv tool, version pinned to match bin/browse) + its bundled Chromium.
 #                Headless browsing is Playwright's Chromium, never Google Chrome --headless;
 #                the Chrome cask stays for the human and for Claude in Chrome.
+#   agent-reach  Agent Reach (uv tool, pinned to a commit) + yt-dlp + mcporter with Exa, and its
+#                skill in ~/.claude/skills. Zero-config channels only: web, YouTube, GitHub, RSS,
+#                Exa search. Channels that need a cookie or a logged-in browser are the human's
+#                to add — never passed here.
 #   macparakeet  link macparakeet-cli from the app bundle into ~/.local/bin if it isn't on PATH
 #   vscode       extensions from vscode-extensions.txt
 #   autoupdate   daily `brew autoupdate` agent (upgrade + cleanup)
@@ -18,6 +22,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PLAYWRIGHT_VERSION="1.63.0"   # keep in step with the header of bin/browse
+# Agent Reach is pinned to a commit, never main: it installs a skill Claude follows. A commit
+# rather than a tag because the v1.5.0 tag predates `install --system` and hidden-input
+# `configure`, and main still calls itself 1.5.0. bin/map-check reads this line.
+AGENT_REACH_COMMIT="a19a171fa980a0785849596492e0af4db800c82f"   # main, 2026-09-15
 
 dry=0; only=""
 while [ $# -gt 0 ]; do
@@ -55,6 +63,29 @@ if want playwright; then
   # Profiles may hold logged-in sessions: private to this user, never in a repo.
   run mkdir -p "$HOME/.config/browse/profiles"
   run chmod 700 "$HOME/.config/browse" "$HOME/.config/browse/profiles"
+fi
+
+if want agent-reach; then
+  step "Agent Reach ${AGENT_REACH_COMMIT:0:7} + yt-dlp + mcporter (zero-config channels)"
+  # mcporter is an npm global. Right after the runtimes step npm may not be on PATH yet,
+  # so fall back to running the installer inside mise's environment.
+  via=""
+  if ! command -v npm >/dev/null && command -v mise >/dev/null; then via="mise exec --"; fi
+  if ! command -v uv >/dev/null; then echo "  uv missing — run brew bundle first" >&2; fail=1
+  elif [ -z "$via" ] && ! command -v npm >/dev/null; then echo "  npm missing — run the runtimes step first" >&2; fail=1
+  else
+    run uv tool install --force "https://github.com/Panniantong/agent-reach/archive/$AGENT_REACH_COMMIT.zip" || fail=1
+    run uv tool install "yt-dlp[default]" || fail=1
+    # --system writes outside the tool's own venv: `npm install -g mcporter`, Exa in
+    # ~/.mcporter/mcporter.json, yt-dlp's JS runtime in ~/.config/yt-dlp/config, and the skill
+    # in ~/.claude/skills/agent-reach. No --channels: every optional one stores a cookie or
+    # drives a logged-in browser, which is the human's decision and the human's step.
+    # The installer copies its skill only into skill directories that already exist, and
+    # ~/.claude/skills does not on a new machine.
+    run mkdir -p "$HOME/.claude/skills"
+    # shellcheck disable=SC2086  # $via is empty or three plain words
+    run $via "$HOME/.local/bin/agent-reach" install --env=auto --system || fail=1
+  fi
 fi
 
 if want macparakeet; then

@@ -1,0 +1,8 @@
+# ~/.zshenv — linked from ~/claude-computer/dotfiles/zshenv.
+#
+# zsh reads this for every shell, interactive or not: an agent's `zsh -c`, a hook, a launchd
+# job. ~/.zshrc is read only by interactive shells, so anything an agent's tools depend on
+# goes here. Environment only — no output, no PATH changes, nothing slow.
+
+# ripgrep reads no config file unless this points at one.
+export RIPGREP_CONFIG_PATH="$HOME/.config/ripgrep/ripgreprc"

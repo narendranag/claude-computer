@@ -1,0 +1,10 @@
+# .ignore — what search tools skip in addition to .gitignore. ripgrep and fd read it.
+# These files are committed, so .gitignore can't list them, but a match inside one is
+# noise for a person and wasted context for an agent. To search them anyway: rg -u
+*.min.js
+*.min.css
+*.map
+pnpm-lock.yaml
+package-lock.json
+uv.lock
+Cargo.lock

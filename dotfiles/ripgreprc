@@ -1,0 +1,11 @@
+# ripgreprc — linked to ~/.config/ripgrep/ripgreprc; found through RIPGREP_CONFIG_PATH (dotfiles/zshenv).
+#
+# Every `rg` an agent or a human runs from a shell reads this. It shapes output only: it must
+# never change which files or lines match, so no globs, no --smart-case, no --hidden here.
+# What to skip belongs in a project's .gitignore or .ignore.
+#
+# One matching line in a minified bundle or a lockfile can be tens of kilobytes. Cap what is
+# printed per line; the preview keeps the first 200 bytes so the match is still visible.
+# For the whole line, or when piping into a parser: rg --no-config …
+--max-columns=200
+--max-columns-preview
