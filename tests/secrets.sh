@@ -388,6 +388,73 @@ if [ -n "${PY:-}" ]; then
 fi
 
 # =========================================================================
+case_new "pre-commit hook: plaintext in a sops file, a decrypted store, the template's own rules"
+mkdir -p "$INST/.githooks" "$WORK/bin-gl"
+cp "$REPO/.githooks/pre-commit" "$INST/.githooks/"
+# gitleaks is covered above; here it is a stub that passes, so only the hook's own rules decide.
+printf '#!/bin/sh\nexit 0\n' > "$WORK/bin-gl/gitleaks"; chmod +x "$WORK/bin-gl/gitleaks"
+hook() { on alpha env PATH="$WORK/bin-gl:$WORK/bin-alpha:$SYSBIN" sh -c 'cd "$0" && .githooks/pre-commit' "$INST"; }
+unstage() { on alpha git -C "$INST" reset -q; }
+git -C "$INST" add -A >/dev/null 2>&1; on alpha git -C "$INST" commit -q -m "test: settle"
+cp "$STORE" "$WORK/store.bak"
+printf '"fake-precommit"' | SOPS_AGE_KEY_FILE="$KA" sops set --value-stdin "$STORE" '["jina"]["api_key"]'
+git -C "$INST" add secrets/secrets.yaml
+hook
+check_exit 0 "$rc"
+cat "$WORK/plain.yaml" "$STORE" > "$WORK/mixed.yaml"; cp "$WORK/mixed.yaml" "$STORE"; git -C "$INST" add secrets/secrets.yaml
+hook
+check_exit 1 "$rc"
+contains "$OUT" "plaintext values: leaked.api_key"
+lacks "$OUT" "plaintext-value"
+printf 'tavily:\n  api_key: fake-decrypted\n' > "$STORE"; git -C "$INST" add secrets/secrets.yaml
+hook
+check_exit 1 "$rc"
+contains "$OUT" "is not sops-encrypted"
+cp "$WORK/store.bak" "$STORE"; unstage
+touch "$INST/.template"
+cp "$INST/.sops.yaml" "$WORK/sops.bak"; echo "# changed" >> "$INST/.sops.yaml"
+echo "age1fake" > "$INST/secrets/backup.pub"
+git -C "$INST" add -f .sops.yaml secrets/backup.pub
+hook
+check_exit 1 "$rc"
+contains "$OUT" "belong in your private instance"
+contains "$OUT" "secrets/backup.pub"
+unstage; cp "$WORK/sops.bak" "$INST/.sops.yaml"; rm -f "$INST/secrets/backup.pub"
+printf 'tavily:\n  api_key: "filled-in"\n' > "$INST/secrets/secrets.example.yaml"; git -C "$INST" add secrets/secrets.example.yaml
+hook
+check_exit 1 "$rc"
+contains "$OUT" "must keep every value empty: tavily.api_key"
+git -C "$INST" checkout -q -- secrets/secrets.example.yaml 2>/dev/null || cp "$REPO/secrets/secrets.example.yaml" "$INST/secrets/"
+unstage; rm "$INST/.template"
+
+case_new "stop hook commits secrets/ with docs/ only when every value is encrypted"
+SH="$REPO/claude-global/hooks/stop.sh"
+stop() { on alpha env CC_HOME="$INST" "$SH" < /dev/null; }
+git -C "$INST" add -A >/dev/null 2>&1; on alpha git -C "$INST" commit -q -m "test: settle"
+printf '"fake-stop"' | SOPS_AGE_KEY_FILE="$KA" sops set --value-stdin "$STORE" '["jina"]["api_key"]'
+echo "note" >> "$INST/docs/machines/alpha.md"
+c0="$(git -C "$INST" rev-list --count HEAD)"
+stop
+[ "$(git -C "$INST" rev-list --count HEAD)" = "$((c0 + 1))" ] && ok "one commit" || bad "stop hook did not commit"
+[ -z "$(git -C "$INST" status --porcelain -- secrets docs)" ] && ok "docs/ and secrets/ both committed" || bad "left uncommitted: $(git -C "$INST" status --porcelain | head -3)"
+cat "$WORK/plain.yaml" "$STORE" > "$WORK/mixed.yaml"; cp "$WORK/mixed.yaml" "$STORE"
+echo "note 2" >> "$INST/docs/machines/alpha.md"
+stop
+contains "$OUT" "NOT committing secrets/"
+lacks "$OUT" "plaintext-value"
+[ -n "$(git -C "$INST" status --porcelain -- secrets)" ] && ok "plaintext store left uncommitted" || bad "plaintext store was committed"
+[ -z "$(git -C "$INST" status --porcelain -- docs)" ] && ok "docs/ still committed" || bad "docs/ not committed"
+git -C "$INST" checkout -q -- secrets/secrets.yaml
+
+case_new "session-start hook reports secrets status in a line"
+on alpha env CC_HOME="$INST" "$REPO/claude-global/hooks/session-start.sh"
+contains "$OUT" "secrets: ok — secrets/secrets.yaml"
+mv "$KA" "$WORK/ka.moved"
+on alpha env CC_HOME="$INST" "$REPO/claude-global/hooks/session-start.sh"
+contains "$OUT" "secrets: key:        none"
+mv "$WORK/ka.moved" "$KA"
+
+# =========================================================================
 case_new "push is designed, not built"
 on alpha "$S" push some-box
 check_exit 5 "$rc"

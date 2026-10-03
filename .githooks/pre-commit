@@ -2,6 +2,14 @@
 # pre-commit — block commits that contain secrets. Installed by /setup, bin/new-app and bin/new-client:
 #   git config core.hooksPath .githooks      (this repo)
 #   cp .githooks/pre-commit .git/hooks/      (new apps)
+#
+# 1. gitleaks scans what is staged.
+# 2. Any staged sops file (a YAML file with top-level `sops:` metadata) must have every non-empty
+#    value encrypted, and anything staged under secrets/ other than README.md and
+#    secrets.example.yaml must be a sops file — a store decrypted in place loses its metadata.
+# 3. In the public template (marked by .template, which /setup deletes in an instance): no machine
+#    files, no store, no .sops.yaml, no backup.pub, and the example's values stay empty.
+# Self-contained (no lib/), because new apps get a copy of this file.
 set -euo pipefail
 
 if ! command -v gitleaks >/dev/null 2>&1; then
@@ -10,13 +18,63 @@ if ! command -v gitleaks >/dev/null 2>&1; then
 fi
 gitleaks git --pre-commit --staged --redact --no-banner
 
-# In the public template (marked by the .template file, which /setup deletes in an instance),
-# machine files other than the example must never be committed.
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+# "<name>.<field>" for each value in a sops-shaped YAML that is neither ENC[…] nor empty.
+# Mirrors cc_secrets_list in lib/common.sh. Reads the staged blob on stdin.
+plaintext_values() {
+  awk '
+    /^[[:space:]]*(#|$)/ {next}
+    /^[^[:space:]]/ {top = $0; sub(/:.*/, "", top); ind = 0
+      v = $0; sub(/^[^:]*:[ ]*/, "", v); sub(/[ ]+#.*$/, "", v)
+      if (top != "sops" && v != "" && v != "{}" && v !~ /^ENC\[/) print top; next}
+    top == "sops" {next}
+    {match($0, /^[ ]+/); cur = RLENGTH; if (ind == 0) ind = cur
+      if (cur > ind) {print top ".(nested)"; next}
+      line = substr($0, cur + 1); k = line; sub(/:.*/, "", k)
+      v = line; sub(/^[^:]*:[ ]*/, "", v); sub(/[ ]+#.*$/, "", v)
+      if (v !~ /^ENC\[/ && v != "" && v != "\"\"" && v != "'\'''\''") print top "." k}' | sort -u
+}
+
+fail=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  case "$f" in *.yaml | *.yml) ;; *) continue ;; esac
+  case "$f" in secrets/secrets.example.yaml | */secrets/secrets.example.yaml) continue ;; esac
+  blob="$(git show ":$f")"
+  if printf '%s\n' "$blob" | grep -q '^sops:'; then
+    bad="$(printf '%s\n' "$blob" | plaintext_values | paste -sd ' ' -)"
+    if [ -n "$bad" ]; then
+      echo "pre-commit: $f is a sops file with plaintext values: $bad" >&2
+      fail=1
+    fi
+  else
+    case "$f" in
+      secrets/* | */secrets/*)
+        echo "pre-commit: $f is under secrets/ but is not sops-encrypted (no sops: metadata) — refusing" >&2
+        fail=1 ;;
+    esac
+  fi
+done <<EOF
+$staged
+EOF
+[ "$fail" -eq 0 ] || exit 1
+
+# In the public template, nothing personal: machine files other than the example, the store, the
+# generated .sops.yaml and the backup key's public half all belong in your private instance.
 if [ -f .template ]; then
-  bad="$(git diff --cached --name-only | grep '^docs/machines/' | grep -v '_example.md$' || true)"
+  bad="$(printf '%s\n' "$staged" | grep -E '^(docs/machines/|secrets/|\.sops\.yaml$)' |
+    grep -vxE 'docs/machines/_example\.md|secrets/README\.md|secrets/secrets\.example\.yaml' || true)"
   if [ -n "$bad" ]; then
-    echo "pre-commit: machine files belong in your private instance, not the template:" >&2
+    echo "pre-commit: these belong in your private instance, not the template:" >&2
     echo "$bad" >&2
     exit 1
+  fi
+  if printf '%s\n' "$staged" | grep -qx 'secrets/secrets.example.yaml'; then
+    bad="$(git show ':secrets/secrets.example.yaml' | plaintext_values | paste -sd ' ' -)"
+    if [ -n "$bad" ]; then
+      echo "pre-commit: secrets/secrets.example.yaml must keep every value empty: $bad" >&2
+      exit 1
+    fi
   fi
 fi

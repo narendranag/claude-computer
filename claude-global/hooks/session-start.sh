@@ -12,11 +12,17 @@ else
   echo "claude-computer: pull FAILED — working from local copy. Resolve before editing docs/. ${out:0:200}"
 fi
 
-case "$("$ROOT/bin/secrets-unlock" --status 2>/dev/null)" in
-  unlocked) echo "bitwarden: unlocked" ;;
-  locked) echo "bitwarden: locked — wrappers that need keys will fail. Ask the user to run \`secrets-unlock\` in a terminal." ;;
-  *) echo "bitwarden: not logged in or not installed" ;;
-esac
+# Names and key state only: `secrets status` never decrypts.
+if [ -x "$ROOT/bin/secrets" ]; then
+  st="$("$ROOT/bin/secrets" status 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    echo "secrets: ok — $(printf '%s\n' "$st" | sed -n 's/^store: *//p' | head -1)"
+    printf '%s\n' "$st" | grep -q '^backup key: none' && echo "secrets: no paper backup key yet — the user runs \`secrets backup-key\` in a terminal"
+  else
+    printf '%s\n' "$st" | grep -E 'none|no —|NOT|should|not installed' | head -3 | sed 's/^/secrets: /'
+    echo "secrets: wrappers that need keys will fail until this is fixed (a human runs the command shown)."
+  fi
+fi
 
 if [ -d "$HOME/vault" ]; then
   # New MacParakeet transcripts first, so the task map below reflects anything already routed.
