@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- **`bin/secrets` and a sops + age secret store**, alongside Bitwarden for now. `secrets/secrets.yaml` in the private instance holds every machine secret as `<name>.<field>`, encrypted to each manager's age key and a paper backup key; `secrets/secrets.example.yaml` is its shape and `secrets/README.md` the rules. Subcommands: `status` and `check` (no decryption), `init [--first]`, `set` (hidden prompt, stdin or `--from-file`), `import-env` (a dotenv file in one pass — names and counts only, `--dry-run`, `--map`), `recipients` (generates `.sops.yaml` from each machine file's `age_recipient:`), `admit`, `revoke` (re-encrypts, rotates the data key, lists what to rotate at providers), `backup-key` and `backup-verify` (terminal only), `env` and `exec --only NAME,… -- <cmd>` (secrets as environment variables for one command). `push` for headless boxes is designed, not built. `lib/common.sh` gains `cc_sops_get`/`cc_sops_set` and friends. `tests/secrets.sh` runs it end to end on throwaway keys in a hermetic HOME — two machines, admit, revoke, import-env, exec, the paper key through a pty, argv logging, gitleaks — and CI installs age, sops 3.11.0 (the floor) and gitleaks to run it. `.gitignore` ships only the store's README and example.
+
 ### Changed
 
 - **darktable is an optional manual install**, no longer in `Brewfile.dev`. Homebrew disabled its cask on 2026-09-01 because darktable's macOS build fails Gatekeeper, so `brew bundle --file Brewfile.dev` failed on that line on every machine. Only the camera brain uses it, so `/setup` phase 6 now asks, and on a yes it is a human step: download from darktable.org, then **Open Anyway** under Privacy & Security. The camera brain's `CLAUDE.md` says to flag a missing `darktable-cli`.

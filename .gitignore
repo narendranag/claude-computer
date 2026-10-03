@@ -10,7 +10,16 @@ _private/
 docs/machines/*
 !docs/machines/_example.md
 
-# Secrets — these live in Bitwarden, never on disk in a repo
+# The secrets store: only its README and example ship in the template. /setup deletes this
+# block in an instance, where secrets/secrets.yaml (sops-encrypted), secrets/backup.pub and
+# .sops.yaml are committed. See secrets/README.md.
+secrets/*
+!secrets/README.md
+!secrets/secrets.example.yaml
+.sops.yaml
+# end of the secrets-store block
+
+# Secrets — plaintext never on disk in a repo. The store above is the one encrypted exception.
 .env
 .env.*
 !.env.example
@@ -24,7 +33,7 @@ id_ed25519*
 credentials.json
 token.json
 *.token
-secrets/
+keys.txt
 .secrets/
 rclone.conf
 bw-session*
