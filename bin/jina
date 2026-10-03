@@ -6,9 +6,9 @@
 #   jina --search "query"      search → markdown results (s.jina.ai)
 #   jina ... --json            JSON response instead of markdown
 #
-# Secret: Bitwarden item "claude-computer/jina", password field = API key.
-# Reader works without a key at a low rate limit; set JINA_NO_KEY=1 to skip Bitwarden.
-# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/bw missing · 4 locked · 5 item missing
+# Secret: jina.api_key in the secrets store (docs/SECRETS.md).
+# Reader works without a key at a low rate limit; set JINA_NO_KEY=1 to skip the key.
+# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/sops missing · 4 no key / not admitted · 5 secret not set
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"
@@ -37,6 +37,6 @@ fi
 if [ "${JINA_NO_KEY:-0}" = "1" ]; then
   curl -sS --fail-with-body --max-time 60 -H "$accept" "$target" || exit "$EX_FAIL"
 else
-  key="$(cc_secret jina)"
+  key="$(cc_secret jina api_key)"
   cc_curl "Authorization: Bearer $key" -H "$accept" "$target" || exit "$EX_FAIL"
 fi

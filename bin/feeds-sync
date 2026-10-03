@@ -97,7 +97,7 @@ def rss_items(url: str, full: bool, cutoff: dt.datetime) -> list[dict]:
 def gmail_items(query: str, days: int) -> list[dict]:
     rc, out = run([str(BIN / "gmail"), "search", f"{query} newer_than:{days}d", "-n", "25", "--json"])
     if rc != 0:
-        raise RuntimeError("gmail search failed (Google auth set up? Bitwarden unlocked?)")
+        raise RuntimeError("gmail search failed (Google auth set up? secrets status)")
     items = []
     for m in json.loads(out or "[]"):
         items.append({"id": f"gmail:{m['id']}", "title": clean(m["subject"], 200),

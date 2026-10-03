@@ -15,9 +15,9 @@
 #   --dry-run       show what would be uploaded
 #   --index-only    just rebuild ~/archive/INDEX.md from `rclone lsjson`
 #
-# Remote: r2:<bucket>/archive/  (credentials from Bitwarden, see docs/SECRETS.md)
+# Remote: r2:<bucket>/archive/  (credentials from the secrets store, see docs/SECRETS.md)
 # Env: CC_ARCHIVE (default ~/archive)
-# Exit codes: 0 ok · 1 upload or verify failed · 2 usage · 3 rclone/jq missing · 4 locked · 5 config
+# Exit codes: 0 ok · 1 upload or verify failed · 2 usage · 3 rclone/jq missing · 4 no key / not admitted · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"

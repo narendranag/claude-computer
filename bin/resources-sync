@@ -7,9 +7,9 @@
 #                                     interrupted run. Can resurrect deleted files — hence --yes.
 #
 # Remote: rescrypt: = rclone crypt over r2:<bucket>/resources (file and folder names encrypted).
-# Keys from Bitwarden; no rclone.conf on disk. See docs/SECRETS.md.
+# Keys from the secrets store; no rclone.conf on disk. See docs/SECRETS.md.
 # Env: CC_RESOURCES (default ~/resources)
-# Exit codes: 0 ok · 1 sync failed (often: needs --resync) · 2 usage · 3 rclone missing · 4 locked · 5 config
+# Exit codes: 0 ok · 1 sync failed (often: needs --resync) · 2 usage · 3 rclone missing · 4 no key / not admitted · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"

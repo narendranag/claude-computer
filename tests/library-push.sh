@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# tests/library-push.sh — drive bin/library-push with a stubbed rclone and bw.
+# tests/library-push.sh — drive bin/library-push with a stubbed rclone and sops.
 #
 # Usage: ./tests/library-push.sh
 #
 # Every case gets its own temporary HOME, library and PATH of stub executables over a
 # hermetic $SYSBIN, so nothing outside the temporary directory is read or touched and no
-# real rclone or Bitwarden call is ever made. `rclone` and `bw` are stubs; each logs its
-# own invocation to $CC_STUB_LOG.
+# real rclone or sops call is ever made. `rclone` and `sops` are stubs; each logs its own
+# invocation to $CC_STUB_LOG. The secrets store is a fake file whose values are shaped like
+# ciphertext and the age key a placeholder, so the helpers' checks pass and the stub answers.
 #
 # Cases: (i) neither books nor comics exists: exit 0, message, rclone never runs ·
 # (ii) --dry-run with books only: rclone gets `copy --dry-run`, never `sync`, no credential
@@ -74,20 +75,34 @@ stub() {
   chmod +x "$d/$n"
 }
 
-# bw: answers status (always unlocked) and the four r2 fields the script reads.
-stub_bw() {
-  stub "$1" bw <<'EOF'
+# sops: answers `decrypt --extract` for the r2 fields the script reads, with no trailing
+# newline, as the real sops does.
+stub_sops() {
+  stub "$1" sops <<'EOF'
 case "$*" in
-  status)               echo '{"status":"unlocked"}' ;;
-  "get password "*r2-crypt*) echo "fake-crypt-password" ;;
-  "get password "*r2*)  echo "fake-secret-access-key" ;;
-  "get username "*r2*)  echo "fake-access-key-id" ;;
-  "get item "*r2*)
-    echo '{"fields":[{"name":"endpoint","value":"https://fake.example/r2"},{"name":"bucket","value":"fake-bucket"}]}' ;;
+  *'["r2"]["access_key_id"]'*)     printf fake-access-key-id ;;
+  *'["r2"]["secret_access_key"]'*) printf fake-secret-access-key ;;
+  *'["r2"]["endpoint"]'*)          printf https://fake.example/r2 ;;
+  *'["r2"]["bucket"]'*)            printf fake-bucket ;;
+  *'["r2-crypt"]["password"]'*)    printf fake-crypt-password ;;
   *) exit 1 ;;
 esac
 exit 0
 EOF
+}
+
+# A store that passes the no-plaintext check: names in clear, values shaped like sops's.
+fake_store() {
+  mkdir -p "$(dirname "$1")"
+  {
+    echo "r2:"
+    for f in access_key_id secret_access_key endpoint bucket; do
+      echo "    $f: ENC[AES256_GCM,data:ZmFrZQ==,iv:ZmFrZQ==,tag:ZmFrZQ==,type:str]"
+    done
+    echo "sops:"
+    echo "    age:"
+    echo "        - recipient: age1fake"
+  } > "$1"
 }
 
 # rclone: logs its own argv (already done by `stub`) and only ever succeeds, unless
@@ -114,13 +129,18 @@ case_new() {
   LOG="$CASE/stub.log"
   mkdir -p "$BIN" "$HOME" "$LIB"
   : > "$LOG"
-  stub_bw "$BIN"
+  stub_sops "$BIN"
+  fake_store "$CASE/secrets.yaml"
+  mkdir -p "$HOME/.config/sops/age"
+  echo "placeholder, never read: sops is a stub" > "$HOME/.config/sops/age/keys.txt"
   stub_rclone "$BIN"
 }
 
 run() { # run [args…] — library-push in this case's world; exit status in $rc
   ( PATH="$BIN:$SYSBIN" \
     HOME="$HOME" \
+    CC_SECRETS_FILE="$CASE/secrets.yaml" \
+    SOPS_AGE_KEY_FILE="$CASE/home/.config/sops/age/keys.txt" \
     CC_LIBRARY="$LIB" \
     CC_STUB_LOG="$LOG" \
     CC_TEST_CHECK_FAILS="${CC_TEST_CHECK_FAILS:-}" \
@@ -135,7 +155,7 @@ check_exit 0 "$rc"
 contains "$OUT" "no $LIB/books here, skipping"
 contains "$OUT" "no $LIB/comics here, skipping"
 log_lacks "$LOG" "rclone"
-log_lacks "$LOG" "bw "
+log_lacks "$LOG" "sops "
 
 # =========================================================================
 case_new "--dry-run with books only: copy --dry-run, never sync, no credential in argv"

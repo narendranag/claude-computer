@@ -150,6 +150,19 @@ check_exit 0 "$rc"
 [ "$(cat "$OUT")" = "fake-tavily-0001" ] && ok "reads back exactly" || bad "read back: $(cat "$OUT")"
 get alpha telegram chat_id
 [ "$(od -c < "$OUT" | head -1)" = "$(printf 'fake-chat-42' | od -c | head -1)" ] && ok "trailing newline from the file dropped" || bad "file value: $(od -c < "$OUT" | head -2)"
+on alpha bash -c '. "$CC_ROOT/lib/common.sh"; cc_secret tavily api_key'
+[ "$(cat "$OUT")" = "fake-tavily-0001" ] && ok "cc_secret (the wrappers' reader) reads it" || bad "cc_secret: $(cat "$OUT")"
+on alpha bash -c '. "$CC_ROOT/lib/common.sh"; cc_secret tavily'
+check_exit 2 "$rc"
+if PY="$(command -v python3)"; then
+  cp "$REPO/lib/cc.py" "$INST/lib/"
+  on alpha "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import cc; sys.stdout.write(cc.secret("telegram", "chat_id"))' "$INST/lib"
+  [ "$(cat "$OUT")" = "fake-chat-42" ] && ok "cc.secret (the Python reader) reads it" || bad "cc.secret: $(cat "$OUT")"
+  on alpha "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import cc
+try: cc.secret("exa", "api_key")
+except cc.CCError as e: sys.exit(e.code)' "$INST/lib"
+  check_exit 5 "$rc"
+fi
 on alpha "$S" set tavily
 check_exit 2 "$rc"
 on alpha "$S" set 'x"].y'

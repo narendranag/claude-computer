@@ -13,7 +13,7 @@
 # never trustworthy off-machine and are excluded from the copy.
 #
 # Env: CC_LIBRARY (default ~/library) · CC_LIBRARY_DIRS (default "books comics")
-# Exit codes: 0 ok (including "nothing to push") · 1 copy/verify failed · 2 usage · 3 rclone missing · 4 locked · 5 config
+# Exit codes: 0 ok (including "nothing to push") · 1 copy/verify failed · 2 usage · 3 rclone missing · 4 no key / not admitted · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"

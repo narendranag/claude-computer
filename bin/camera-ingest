@@ -21,7 +21,7 @@
 # Never deletes anything from the card. Re-running is safe: identical files are skipped.
 #
 # Env: CC_CAMERA (default ~/library/camera) · CC_CAMERA_EXTS (default as above)
-# Exit codes: 0 ok · 1 copy/verify/push failed · 2 usage · 3 exiftool/rclone missing · 4 locked · 5 config
+# Exit codes: 0 ok · 1 copy/verify/push failed · 2 usage · 3 exiftool/rclone missing · 4 no key / not admitted · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"

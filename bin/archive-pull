@@ -7,7 +7,7 @@
 #   archive-pull --reindex                rebuild INDEX.md from R2
 #
 # Restores never overwrite: an existing DEST is an error. R2 keeps its copy.
-# Exit codes: 0 ok (search: found) · 1 failed / nothing found · 2 usage · 3 rclone missing · 4 locked · 5 config
+# Exit codes: 0 ok (search: found) · 1 failed / nothing found · 2 usage · 3 rclone missing · 4 no key / not admitted · 5 config
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"

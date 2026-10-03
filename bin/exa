@@ -8,8 +8,8 @@
 #   --chars N   text excerpt per result (default 800)
 #   --json      raw API response
 #
-# Secret: Bitwarden item "claude-computer/exa", password field = API key.
-# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/bw missing · 4 locked · 5 item missing
+# Secret: exa.api_key in the secrets store (docs/SECRETS.md).
+# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/sops missing · 4 no key / not admitted · 5 secret not set
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"
@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$query" ] || { cc_usage >&2; exit "$EX_USAGE"; }
 
-key="$(cc_secret exa)"
+key="$(cc_secret exa api_key)"
 body="$(jq -n --arg q "$query" --argjson n "$n" --argjson c "$chars" \
   '{query:$q, type:"auto", numResults:$n, contents:{text:{maxCharacters:$c}}}')"
 resp="$(cc_curl "x-api-key: $key" -H 'Content-Type: application/json' \

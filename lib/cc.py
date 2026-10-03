@@ -7,10 +7,8 @@ Import from a uv script with:
 
 from __future__ import annotations
 
-import base64
-import json
 import os
-import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -18,9 +16,12 @@ import sys
 from pathlib import Path
 
 EX_OK, EX_FAIL, EX_USAGE, EX_DEPS, EX_LOCKED, EX_CONFIG = 0, 1, 2, 3, 4, 5
-ROOT = Path(__file__).resolve().parent.parent
-BW_PREFIX = os.environ.get("CC_BW_PREFIX", "claude-computer/")
-_KC_SERVICE = "claude-computer-bw-session"
+ROOT = Path(os.environ.get("CC_ROOT") or Path(__file__).resolve().parent.parent)
+SECRETS_FILE = Path(os.environ.get("CC_SECRETS_FILE") or ROOT / "secrets" / "secrets.yaml")
+# sops's macOS default is ~/Library/Application Support/sops/age/keys.txt; launchd jobs and
+# hooks never read ~/.zshenv, so the one path is set here too (as lib/common.sh does).
+os.environ.setdefault("SOPS_AGE_KEY_FILE", str(Path.home() / ".config" / "sops" / "age" / "keys.txt"))
+_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class CCError(Exception):
@@ -37,77 +38,67 @@ def host() -> str:
     return socket.gethostname().split(".")[0]
 
 
-def _load_session() -> None:
-    if os.environ.get("BW_SESSION"):
-        return
-    s = ""
-    if platform.system() == "Darwin":
-        r = subprocess.run(
-            ["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", _KC_SERVICE, "-w"],
-            capture_output=True, text=True, check=False,
-        )
-        s = r.stdout.strip() if r.returncode == 0 else ""
-    else:
-        f = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "claude-computer-bw-session"
-        s = f.read_text().strip() if f.is_file() else ""
-    if s:
-        os.environ["BW_SESSION"] = s
+def _state(name: str, field: str) -> str:
+    """enc | empty | plain | '' (absent) for <name>.<field>, read without decrypting.
+
+    Mirrors cc_secrets_list in lib/common.sh: sops writes one key per line, values on one line.
+    """
+    top, ind = "", 0
+    for line in SECRETS_FILE.read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line[0].isspace():
+            top, ind = line.split(":", 1)[0], 0
+            continue
+        if top != name:
+            continue
+        cur = len(line) - len(line.lstrip(" "))
+        ind = ind or cur
+        if cur != ind:
+            continue
+        k, _, v = line.strip().partition(":")
+        if k == field:
+            v = v.strip()
+            if v.startswith("ENC["):
+                return "enc"
+            return "empty" if v in ("", '""', "''") else "plain"
+    return ""
 
 
-def _bw(*args: str, stdin: str | None = None) -> str:
-    if not shutil.which("bw"):
-        raise CCError(EX_DEPS, "missing dependency: bw")
-    _load_session()
-    r = subprocess.run(["bw", *args], input=stdin, capture_output=True, text=True, check=False)
+def secret(name: str, field: str) -> str:
+    """Decrypt one value, <name>.<field>, from secrets/secrets.yaml. Never an argument to anything."""
+    if not (_NAME.match(name) and _NAME.match(field)):
+        raise CCError(EX_USAGE, f"not a secret name: {name}.{field}")
+    if not shutil.which("sops"):
+        raise CCError(EX_DEPS, "missing dependency: sops")
+    if not SECRETS_FILE.is_file():
+        raise CCError(EX_CONFIG, f"no secrets store at {SECRETS_FILE}. See docs/SECRETS.md")
+    state = _state(name, field)
+    if state in ("", "empty"):
+        raise CCError(EX_CONFIG, f"secret '{name}.{field}' is not set. A human runs: secrets set {name}.{field}")
+    if state != "enc":
+        raise CCError(EX_FAIL, f"secret '{name}.{field}' is stored unencrypted — see secrets/README.md")
+    if not Path(os.environ["SOPS_AGE_KEY_FILE"]).is_file():
+        raise CCError(EX_LOCKED, f"no age key at {os.environ['SOPS_AGE_KEY_FILE']}. Run: secrets init")
+    r = subprocess.run(
+        ["sops", "decrypt", "--extract", f'["{name}"]["{field}"]', str(SECRETS_FILE)],
+        capture_output=True, text=True, check=False,
+    )
     if r.returncode != 0:
-        raise CCError(EX_FAIL, f"bw {args[0]} failed: {r.stderr.strip()}")
+        raise CCError(EX_LOCKED, f"this machine's age key can't open the store. On a manager: secrets admit {host()}")
     return r.stdout
 
 
-def require_unlocked() -> None:
-    status = json.loads(_bw("status") or "{}").get("status", "unauthenticated")
-    if status == "unauthenticated":
-        raise CCError(EX_LOCKED, "Bitwarden not logged in. Run: bw login")
-    if status != "unlocked":
-        raise CCError(EX_LOCKED, "Bitwarden is locked. Run: secrets-unlock (in a terminal)")
-
-
-def secret(name: str, field: str = "password") -> str:
-    """password field, a custom field by name, or 'notes' of item <prefix><name>."""
-    require_unlocked()
-    item = BW_PREFIX + name
-    try:
-        if field in ("password", "notes"):
-            v = _bw("get", field, item)
-        else:
-            data = json.loads(_bw("get", "item", item))
-            v = next((f["value"] for f in data.get("fields") or [] if f["name"] == field), "")
-    except CCError:
-        v = ""
-    if not v:
-        raise CCError(EX_CONFIG, f"Bitwarden item '{item}' has no '{field}'. See docs/SECRETS.md")
-    return v
-
-
-def set_note(name: str, notes: str) -> None:
-    """Create or update secure note <prefix><name>. Used only for OAuth tokens a wrapper minted."""
-    require_unlocked()
-    item = BW_PREFIX + name
-    try:
-        data = json.loads(_bw("get", "item", item))
-    except CCError:
-        data = None
-    if data is None:
-        tmpl = json.loads(_bw("get", "template", "item"))
-        tmpl.update({"type": 2, "name": item, "notes": notes, "secureNote": {"type": 0}, "login": None})
-        _bw("create", "item", _encode(tmpl))
-    else:
-        data["notes"] = notes
-        _bw("edit", "item", data["id"], _encode(data))
-
-
-def _encode(obj: dict) -> str:
-    return base64.b64encode(json.dumps(obj).encode()).decode()
+def set_secret(name: str, field: str, value: str) -> None:
+    """Store <name>.<field> through `secrets set`: value on stdin, then lock, commit and push."""
+    if not (_NAME.match(name) and _NAME.match(field)):
+        raise CCError(EX_USAGE, f"not a secret name: {name}.{field}")
+    r = subprocess.run(
+        [str(ROOT / "bin" / "secrets"), "set", f"{name}.{field}"],
+        input=value, capture_output=True, text=True, check=False,
+    )
+    if r.returncode != 0:
+        raise CCError(r.returncode, f"secrets set {name}.{field} failed: {r.stderr.strip()}")
 
 
 def run_main(fn) -> None:

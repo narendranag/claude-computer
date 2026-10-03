@@ -8,8 +8,8 @@
 #   --depth     basic (default, cheaper) or advanced
 #   --json      raw API response
 #
-# Secret: Bitwarden item "claude-computer/tavily", password field = API key.
-# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/bw missing · 4 locked · 5 item missing
+# Secret: tavily.api_key in the secrets store (docs/SECRETS.md).
+# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/sops missing · 4 no key / not admitted · 5 secret not set
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"
@@ -27,7 +27,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$query" ] || { cc_usage >&2; exit "$EX_USAGE"; }
 
-key="$(cc_secret tavily)"
+key="$(cc_secret tavily api_key)"
 body="$(jq -n --arg q "$query" --argjson n "$n" --arg d "$depth" \
   '{query:$q, max_results:$n, search_depth:$d, include_answer:true}')"
 resp="$(cc_curl "Authorization: Bearer $key" -H 'Content-Type: application/json' \

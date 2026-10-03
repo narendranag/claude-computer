@@ -11,8 +11,8 @@ Usage:
                                                     create an event; ISO like 2026-10-01T09:00:00-05:00
                                                     or a date (2026-10-01) for all-day
 
-Auth: OAuth token shared with gmail/gdrive, kept in Bitwarden (see lib/google_auth.py).
-Exit codes: 0 ok · 1 API error · 2 usage · 3 bw missing · 4 locked · 5 credentials missing
+Auth: OAuth token shared with gmail/gdrive, kept in the secrets store (see lib/google_auth.py).
+Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
 """
 
 import argparse

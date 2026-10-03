@@ -1,8 +1,9 @@
 """OAuth for the gcal / gmail / gdrive wrappers.
 
-One OAuth client (Desktop app) and one token shared by all three wrappers, both in Bitwarden:
-  claude-computer/google-credentials   secure note: the downloaded credentials.json
-  claude-computer/google-token         secure note: the authorised token (written by the first run)
+One OAuth client (Desktop app) and one token shared by all three wrappers, both in the
+secrets store (docs/SECRETS.md):
+  google.credentials   the downloaded credentials.json
+  google.token         the authorised token (written by the first run)
 
 Nothing is written to disk. First run opens a browser for consent (the human does this).
 """
@@ -27,7 +28,7 @@ def credentials():
 
     creds = None
     try:
-        creds = Credentials.from_authorized_user_info(json.loads(cc.secret("google-token", "notes")), SCOPES)
+        creds = Credentials.from_authorized_user_info(json.loads(cc.secret("google", "token")), SCOPES)
     except cc.CCError as e:
         if e.code != cc.EX_CONFIG:
             raise
@@ -37,10 +38,10 @@ def credentials():
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
     else:
-        client = json.loads(cc.secret("google-credentials", "notes"))
+        client = json.loads(cc.secret("google", "credentials"))
         flow = InstalledAppFlow.from_client_config(client, SCOPES)
         creds = flow.run_local_server(port=0, open_browser=True)
-    cc.set_note("google-token", creds.to_json())
+    cc.set_secret("google", "token", creds.to_json())
     return creds
 
 

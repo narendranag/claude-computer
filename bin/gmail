@@ -10,8 +10,8 @@ Usage:
   gmail get <message-id> [--html]         one message as markdown-ish text (headers + body)
   gmail labels                            list labels
 
-Auth: OAuth token shared with gcal/gdrive, kept in Bitwarden (see lib/google_auth.py).
-Exit codes: 0 ok · 1 API error · 2 usage · 3 bw missing · 4 locked · 5 credentials missing
+Auth: OAuth token shared with gcal/gdrive, kept in the secrets store (see lib/google_auth.py).
+Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
 """
 
 import argparse

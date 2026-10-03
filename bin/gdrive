@@ -12,8 +12,8 @@ Usage:
   gdrive share <file-id> <email> [--role reader|commenter|writer]
                                                share with a person (sends Google's notification)
 
-Auth: OAuth token shared with gcal/gmail, kept in Bitwarden (see lib/google_auth.py).
-Exit codes: 0 ok · 1 API error · 2 usage · 3 bw missing · 4 locked · 5 credentials missing
+Auth: OAuth token shared with gcal/gmail, kept in the secrets store (see lib/google_auth.py).
+Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
 """
 
 import argparse

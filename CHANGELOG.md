@@ -12,6 +12,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- **Every wrapper reads its key from the sops store**, not Bitwarden: `cc_secret <name> <field>` in bash (`cc_secret tavily api_key`) and `cc.secret(name, field)` in Python both decrypt one value with `sops decrypt --extract`, after checking by name — without decrypting — that it is set and encrypted. The new paths: `telegram.token`/`chat_id`, `tavily`/`firecrawl`/`jina`/`exa.api_key`, `r2.access_key_id`/`secret_access_key`/`endpoint`/`bucket`, `r2-crypt.password`/`salt`, `google.credentials`/`token`. Exit code 4 now means "no age key, or this machine isn't a recipient". The Bitwarden session helpers leave `lib/common.sh` and `lib/cc.py`; `tests/library-push.sh` stubs `sops` in place of `bw`.
 - **darktable is an optional manual install**, no longer in `Brewfile.dev`. Homebrew disabled its cask on 2026-09-01 because darktable's macOS build fails Gatekeeper, so `brew bundle --file Brewfile.dev` failed on that line on every machine. Only the camera brain uses it, so `/setup` phase 6 now asks, and on a yes it is a human step: download from darktable.org, then **Open Anyway** under Privacy & Security. The camera brain's `CLAUDE.md` says to flag a missing `darktable-cli`.
 
 ### Fixed

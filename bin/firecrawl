@@ -7,9 +7,9 @@
 #   --full   keep navigation, headers and footers (default: main content only)
 #   --json   raw API response
 #
-# Secret: Bitwarden item "claude-computer/firecrawl", password field = API key.
+# Secret: firecrawl.api_key in the secrets store (docs/SECRETS.md).
 # Env: FIRECRAWL_API (default https://api.firecrawl.dev/v2)
-# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/bw missing · 4 locked · 5 item missing
+# Exit codes: 0 ok · 1 API error · 2 usage · 3 curl/jq/sops missing · 4 no key / not admitted · 5 secret not set
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"
@@ -26,7 +26,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$url" ] || { cc_usage >&2; exit "$EX_USAGE"; }
 
-key="$(cc_secret firecrawl)"
+key="$(cc_secret firecrawl api_key)"
 body="$(jq -n --arg u "$url" --argjson m "$main" '{url:$u, formats:["markdown"], onlyMainContent:$m}')"
 resp="$(cc_curl "Authorization: Bearer $key" -H 'Content-Type: application/json' \
   -d "$body" "${FIRECRAWL_API:-https://api.firecrawl.dev/v2}/scrape")" || cc_die "$EX_FAIL" "API error: $resp"

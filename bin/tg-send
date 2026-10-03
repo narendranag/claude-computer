@@ -6,12 +6,12 @@
 #   long-job 2>&1 | tail -20 | tg-send
 #   tg-send --dry-run "text"     print what would be sent; needs no secrets
 #
-# Secrets (Bitwarden item "claude-computer/telegram"):
-#   password field → bot token (from BotFather)
-#   custom field "chat_id" → your chat id (message the bot, then read getUpdates)
+# Secrets (docs/SECRETS.md):
+#   telegram.token   → bot token (from BotFather)
+#   telegram.chat_id → your chat id (message the bot, then read getUpdates)
 #
 # Output: "[<host>] <text>", truncated to Telegram's 4096-character limit.
-# Exit codes: 0 sent · 1 Telegram rejected it · 2 no text · 3 missing curl/bw/jq · 4 locked · 5 item missing
+# Exit codes: 0 sent · 1 Telegram rejected it · 2 no text · 3 missing curl/sops/jq · 4 no key / not admitted · 5 secret not set
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"
@@ -37,7 +37,7 @@ if [ "$dry" -eq 1 ]; then
 fi
 
 cc_need curl jq
-token="$(cc_secret telegram)"
+token="$(cc_secret telegram token)"
 chat_id="$(cc_secret telegram chat_id)"
 
 # URL passed on stdin, not argv, so the token never shows up in `ps`.
