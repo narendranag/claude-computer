@@ -17,7 +17,7 @@ Before each numbered phase, tell me in three lines what you are about to do and 
 - `git remote -v`, `ls docs/machines/`, `gh auth status`.
 - Ask me for my name and git email. Copy `dotfiles/gitconfig` to `~/.gitconfig` (back up an existing one to `~/.gitconfig.backup-<date>` and carry over anything personal from it), filling `{{git_name}}` and `{{git_email}}`. Git needs an identity before the first commit below.
 - Install the secret scanner before any commit: `brew install gitleaks`, then `git config core.hooksPath .githooks`.
-- **If a `.template` file exists**, this is a fresh copy of the public template becoming your private instance. Check `gh repo view --json visibility` says `PRIVATE` — stop if it doesn't. Then, after I confirm: delete `.template`; remove the `docs/machines/*` lines from `.gitignore`; add the template as a fetch-only remote using the URL in `UPSTREAM` (`git remote add upstream "$(cat UPSTREAM)" && git remote set-url --push upstream DISABLED`); fill the placeholders in `claude-global/CLAUDE.md` (`{{user_name}}` from me, `{{github_user}}` from `gh api user --jq .login`); commit `[<host>] instance: initialise from template` and push. `origin` is still HTTPS here, which `gh` authenticates; phase 2 switches it to SSH.
+- **If a `.template` file exists**, this is a fresh copy of the public template becoming your private instance. Check `gh repo view --json visibility` says `PRIVATE` — stop if it doesn't. Then, after I confirm: delete `.template`; remove the `docs/machines/*` lines and the secrets-store block (from `# The secrets store` to `# end of the secrets-store block`) from `.gitignore`, so machine files, `secrets/secrets.yaml`, `secrets/backup.pub` and `.sops.yaml` can be committed; add the template as a fetch-only remote using the URL in `UPSTREAM` (`git remote add upstream "$(cat UPSTREAM)" && git remote set-url --push upstream DISABLED`); fill the placeholders in `claude-global/CLAUDE.md` (`{{user_name}}` from me, `{{github_user}}` from `gh api user --jq .login`); commit `[<host>] instance: initialise from template` and push. `origin` is still HTTPS here, which `gh` authenticates; phase 2 switches it to SSH.
 
 ## 1. Identity
 
@@ -40,7 +40,7 @@ Before each numbered phase, tell me in three lines what you are about to do and 
 
 ## 4. Global Claude config
 
-This comes before Bitwarden so the deny rules (no raw `bw get` / `bw list`) are in force from here on.
+This comes before secrets so the deny rules (no `sops decrypt`, no reading `~/.config/sops/`) are in force from here on.
 
 - **`brew install jq` first.** Every hook in `claude-global/hooks/` parses its stdin with `jq`, and phase 6's `brew bundle` is still several phases away. Link the hooks before `jq` exists and they run without a session id, so the Stop hook can't tell a long turn and the Notification hook sends an empty message.
 
@@ -57,10 +57,16 @@ If any of these already exist, **don't just move them aside**: show me a diff of
 
 Write the resume line in `TASKS.md` (see top), commit, and tell me to restart Claude Code in `~/claude-computer`. After the restart, confirm the status line shows auto mode. If auto mode isn't available on this account or model, the session starts in Manual; tell me, and carry on — the ask and deny rules work the same.
 
-## 5. Bitwarden
+## 5. Secrets
 
-- `brew install bitwarden-cli` if missing. I run `bw login` myself, then `./bin/secrets-unlock` in a terminal. You verify with `./bin/secrets-unlock --status`.
-- `./bin/secrets-unlock --check` reports which of the items in `docs/SECRETS.md` exist, without reading any value. Missing items are fine for now: list them in `TASKS.md` under `## Later` with the service each one unlocks.
+Machine secrets live in `secrets/secrets.yaml`, encrypted with sops to one age key per machine plus a paper backup key (`docs/SECRETS.md`). You never decrypt anything; I type every value.
+
+- `brew install age sops` if missing (`sops --version` must be 3.11 or newer).
+- **The fleet's first machine** (no `secrets/secrets.yaml` yet): ask me, then `./bin/secrets init --first`. It makes this machine's key at `~/.config/sops/age/keys.txt`, records `age_recipient:` in the machine file, writes `.sops.yaml`, creates the empty store and commits. Then **I** run, in a terminal, `./bin/secrets backup-key` — I write the paper key down by hand twice and keep the sheets in two places — and `./bin/secrets backup-verify`. Wait until I say both are done.
+- **Any later machine**: ask me, then `./bin/secrets init`. Tell me to run `git pull && secrets admit <host>` on a machine that can already read the store; then `git pull` here.
+- Verify with `./bin/secrets status` (key mode 600, `recipient: yes`).
+- Values: **I** run `./bin/secrets set <name>.<field>` in a terminal for each (the prompt is hidden). If I have a plaintext dotenv file, you may show the mapping with `./bin/secrets import-env <file> --dry-run`, then ask before running it without `--dry-run`; afterwards I delete the plaintext file. `./bin/secrets check` lists what is still missing, by name only: put those in `TASKS.md` under `## Later` with the service each one unlocks.
+- Record in the machine file: under **Keys**, `Secrets: sops + age, key ~/.config/sops/age/keys.txt`; under **Sensitive locations**, `~/.config/sops/age/`.
 
 ## 6. Environment
 
@@ -76,12 +82,12 @@ Write the resume line in `TASKS.md` (see top), commit, and tell me to restart Cl
 ## 7. Protection
 
 - **Firewall**: `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on` — I type the password.
-- **FileVault**: if `fdesetup status` says off, I turn it on in System Settings → Privacy & Security, and store the recovery key in Bitwarden myself.
+- **FileVault**: if `fdesetup status` says off, I turn it on in System Settings → Privacy & Security, and store the recovery key in my password manager myself.
 - **Time Machine**: ask me which target (external disk or a box on the tailnet); I enable it in System Settings. Record it in the machine file.
 
 ## 8. Verify and record
 
-- A new shell now has `bin/` on `PATH`. `tg-send "hello from <host>"` — I confirm it arrived (skip if the Telegram item is still missing).
+- A new shell now has `bin/` on `PATH`. `tg-send "hello from <host>"` — I confirm it arrived (skip if `telegram.token` is still missing).
 - `map-check`. Fix the machine or the map until it is clean; `security-check` must pass.
 - Update `docs/machines/<host>.md`, append decisions, tick the resume line, commit `[<host>] setup complete`, push.
 - Folders, brains and workflows come next and are separate jobs. Add them to `TASKS.md` under `## Next`: create `~/clients`, `~/projects/_scratch`, `~/products` and `~/personal`; **the vault: `./bin/vault-setup`** — it creates `~/vault` from `templates/vault` and installs Obsidian Git, Dataview and Templater from Obsidian's registry, which is third-party code, so read what it prints; **ask me before passing `--create-remote`**, which publishes the vault to GitHub. It comes after phase 6, which installs the `obsidian` cask. Then the `~/archive`, `~/library/camera` and `~/resources` brains from `templates/`; ask whether I have clients: move each existing client folder into `~/clients`, then run `/new-client` for it; `schedule install` for tasks-sync, feeds-sync, the daily note and map-check. Tell me what is left.

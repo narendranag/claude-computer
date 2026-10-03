@@ -11,5 +11,5 @@ The idea: $ARGUMENTS
    - `CLAUDE.md`: what and for whom, the stack chosen and any deviation from DEV-GUIDELINES with the reason, how to run/test/deploy, pointer to `~/claude-computer/docs/`.
    - `TASKS.md`: a first `## Now` of three to five concrete tasks to reach something runnable.
    - `DECISIONS.md`: the target choice and why.
-4. If it needs analytics/errors, note the PostHog key item to create in Bitwarden (`claude-computer/posthog-<name>`) — I create it.
+4. If it needs analytics/errors, note the PostHog key to add as `posthog.<name>` — I run `secrets set posthog.<name>` in a terminal. The app reads it through `.envrc` with `eval "$(secrets env --only POSTHOG_KEY=posthog.<name>)"` (direnv), or its dev command runs under `secrets exec --only POSTHOG_KEY=posthog.<name> -- <cmd>`.
 5. Run `~/claude-computer/bin/tasks-sync` so the vault hub appears. Commit, push, and tell me the path and repo URL.

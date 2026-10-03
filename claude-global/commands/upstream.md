@@ -14,4 +14,5 @@ Upstream: $ARGUMENTS
    - `gitleaks git --redact --no-banner` and `gitleaks dir . --redact --no-banner`
    - `rg -i "$(whoami)|$(scutil --get LocalHostName)|<tailnet name>|@gmail|@icloud"` → must be empty
    - `ls docs/machines/` → only `_example.md`
+   - `ls secrets/` → only `README.md` and `secrets.example.yaml`; no `.sops.yaml`; `rg 'AGE-SECRET-KEY-1[0-9A-Z]{58}|ENC\[AES256' .` → must be empty
 5. Add a CHANGELOG entry under `[Unreleased]`, show me the full diff, and only after I approve: push the branch and `gh pr create` against the template.
