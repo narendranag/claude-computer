@@ -90,11 +90,11 @@ def secret(name: str, field: str) -> str:
 
 
 def set_secret(name: str, field: str, value: str) -> None:
-    """Store <name>.<field> through `secrets set`: value on stdin, then lock, commit and push."""
+    """Store <name>.<field> through `secrets set --stdin`: value on stdin, then lock, commit and push."""
     if not (_NAME.match(name) and _NAME.match(field)):
         raise CCError(EX_USAGE, f"not a secret name: {name}.{field}")
     r = subprocess.run(
-        [str(ROOT / "bin" / "secrets"), "set", f"{name}.{field}"],
+        [str(ROOT / "bin" / "secrets"), "set", f"{name}.{field}", "--stdin"],
         input=value, capture_output=True, text=True, check=False,
     )
     if r.returncode != 0:

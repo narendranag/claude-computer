@@ -136,7 +136,7 @@ check_exit 2 "$rc"
 
 # =========================================================================
 case_new "set from stdin and from a file: encrypted, committed, never printed"
-on alpha sh -c 'printf "fake-tavily-0001" | "$0" set tavily.api_key' "$S"
+on alpha sh -c 'printf "fake-tavily-0001" | "$0" set tavily.api_key --stdin' "$S"
 check_exit 0 "$rc"
 lacks "$OUT" "fake-tavily-0001"
 lacks "$STORE" "fake-tavily-0001"
@@ -163,6 +163,9 @@ try: cc.secret("exa", "api_key")
 except cc.CCError as e: sys.exit(e.code)' "$INST/lib"
   check_exit 5 "$rc"
 fi
+on alpha sh -c 'printf "fake-typed" | "$0" set tavily.api_key' "$S"
+check_exit 2 "$rc"
+contains "$OUT" "no terminal to prompt on"
 on alpha "$S" set tavily
 check_exit 2 "$rc"
 on alpha "$S" set 'x"].y'
@@ -269,7 +272,7 @@ get beta tavily api_key
 [ "$(cat "$OUT")" = fake-tavily-0001 ] && ok "beta reads the store after admit" || bad "beta: $(cat "$OUT")"
 on alpha "$S" recipients --check
 check_exit 0 "$rc"
-on beta sh -c 'printf "fake-exa-0003" | "$0" set exa.api_key' "$S"
+on beta sh -c 'printf "fake-exa-0003" | "$0" set exa.api_key --stdin' "$S"
 check_exit 0 "$rc"
 
 case_new "revoke beta: recipient gone, data key rotated, list of what to rotate"
@@ -331,7 +334,7 @@ for t in sops jq; do
   chmod +x "$WORK/argvlog/$t"
 done
 : > "$WORK/argv.log"
-on alpha env PATH="$WORK/argvlog:$WORK/bin-alpha:$SYSBIN" sh -c 'printf "fake-argv-0004" | "$0" set jina.api_key' "$S"
+on alpha env PATH="$WORK/argvlog:$WORK/bin-alpha:$SYSBIN" sh -c 'printf "fake-argv-0004" | "$0" set jina.api_key --stdin' "$S"
 check_exit 0 "$rc"
 printf 'EXA_API_KEY=fake-argv-0005\n' > "$WORK/argv.env"
 on alpha env PATH="$WORK/argvlog:$WORK/bin-alpha:$SYSBIN" "$S" import-env "$WORK/argv.env" --overwrite
@@ -393,7 +396,7 @@ case_new "sops older than $(awk -F'"' '/CC_SOPS_MIN=/ {print $2}' "$REPO/lib/com
 mkdir -p "$WORK/oldsops"
 printf '#!/bin/sh\n[ "$1" = --disable-version-check ] && { echo "sops 3.10.2"; exit 0; }\nexit 1\n' > "$WORK/oldsops/sops"
 chmod +x "$WORK/oldsops/sops"
-on alpha env PATH="$WORK/oldsops:$WORK/bin-alpha:$SYSBIN" sh -c 'printf x | "$0" set exa.api_key' "$S"
+on alpha env PATH="$WORK/oldsops:$WORK/bin-alpha:$SYSBIN" sh -c 'printf x | "$0" set exa.api_key --stdin' "$S"
 check_exit 3 "$rc"
 contains "$OUT" "too old"
 

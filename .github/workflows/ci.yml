@@ -130,6 +130,17 @@ jobs:
           # A typo in a permission rule fails open, so check the shape too.
           jq -e '.permissions.deny | type == "array" and length > 0' claude-global/settings.json > /dev/null
           jq -e '.permissions.defaultMode == "auto"' claude-global/settings.json > /dev/null
+          # Claude never decrypts: the secret-reading commands must be denied, the ones that run or
+          # change something with secrets asked, and none of either may be allowed outright.
+          jq -e '.permissions as $p
+            | (["Bash(sops decrypt:*)", "Bash(sops -d:*)", "Bash(sops edit:*)", "Bash(sops exec-env:*)",
+                "Bash(sops set:*)", "Bash(age -d:*)", "Bash(age-keygen:*)", "Bash(secrets env:*)",
+                "Bash(secrets backup-key:*)", "Bash(secrets backup-verify:*)", "Bash(secrets set*--stdin*)",
+                "Read(~/.config/sops/**)"] - $p.deny | length == 0)
+            and (["Bash(secrets set:*)", "Bash(secrets import-env:*)", "Bash(secrets exec:*)",
+                  "Bash(secrets admit:*)", "Bash(secrets revoke:*)", "Bash(secrets init:*)"] - $p.ask | length == 0)
+            and ([$p.allow[] | select(test("sops (decrypt|edit|exec|set)|secrets (env|exec|set|import-env|backup)|age-keygen"))] | length == 0)' \
+            claude-global/settings.json > /dev/null
       - name: Validate the issue-form templates
         run: |
           set -euo pipefail
