@@ -29,6 +29,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - **Docs describe sops + age everywhere.** `docs/SECRETS.md` is rewritten: the store, the table of `<name>.<field>` secrets, setting values, `secrets exec` for projects, the rules for Claude, removing a machine, **Migrating from a plaintext dotenv file** and **Migrating from Bitwarden**. The README's Trust section, `CLAUDE.md`, the global `CLAUDE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `DEV-GUIDELINES.md`, `FIRST-PROMPT.md` and the `web`/`cli`/`desktop`/`mobile`/`client`/`archive` templates follow; `secrets/README.md` gains client secrets (a sops file in each client repo). The example machine file gains `age_recipient:` in its frontmatter and the age key under Sensitive locations. `docs/TEMPLATE-DECISIONS.md` supersedes the Bitwarden entries.
 
+- The README diagrams show the secrets store instead of Bitwarden: the map's bottom card, the build's Phase 0 and Foundation steps (a passwords app for your own logins; the age key and admission), the session loop's `secrets status`, the `bin/` chips and the hero's list. `docs/diagrams/render.py` changed and every SVG was regenerated from it.
+
 ### Fixed
 
 - **The Google OAuth token no longer passes through a command line.** `lib/cc.py`'s `set_note()` handed the base64-encoded token, refresh token included, to `bw create`/`bw edit` as an argument, readable by any process through `ps` — against the repo's own rule. The token now goes to `secrets set` on stdin.

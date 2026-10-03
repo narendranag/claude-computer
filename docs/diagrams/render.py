@@ -252,7 +252,7 @@ def draw_map(t: dict) -> str:
     s = SVG(W, H, t, "The map",
             "Folders in the home directory, what each has (brain, repo), how each syncs (git to GitHub, rclone to "
             "Cloudflare R2, encrypted two-way for resources), and the fleet: manager machines on a Tailscale tailnet "
-            "reaching headless boxes over SSH, Bitwarden feeding every script, Telegram receiving from every machine.")
+            "reaching headless boxes over SSH, a sops-encrypted secrets file feeding every script, Telegram receiving from every machine.")
     s.header("Diagram 1 · The map", "Where everything lives, and how it leaves the machine",
              "One brain per purpose folder. Each folder has exactly one way off the machine — and nothing else syncs.")
 
@@ -413,15 +413,15 @@ def draw_map(t: dict) -> str:
     s.path(f"M{cx + cw / 2},{fy + 50 + 84 + 68 + 2} L{cx + cw / 2},{hy - 3}", t["ink"], 1.5, end=True)
     s.text(cx + cw / 2 + 10, hy - 26, "SSH over Tailscale", 11.5, 600, t["ink"])
 
-    # --- Bottom: Bitwarden and Telegram -------------------------------------------
+    # --- Bottom: the secrets store and Telegram -----------------------------------
     by = ay + ah + 36
     card(s, ax, by, bx + bw - ax, 64)
     s.icon_key(ax + 22, by + 22, t["accent"])
-    s.text(ax + 56, by + 29, "Bitwarden", 15, 700)
-    s.text(ax + 142, by + 29, "every key, and nowhere else", 14, 500, t["ink"])
-    s.text(ax + 56, by + 48, "bin/ wrappers read at run time with bw get · no keys in files, repos, rclone.conf, or the map", 12, 400, t["muted"])
+    s.text(ax + 56, by + 29, "Secrets", 15, 700)
+    s.text(ax + 128, by + 29, "every key, encrypted, in one file", 14, 500, t["ink"])
+    s.text(ax + 56, by + 48, "secrets/secrets.yaml, sops + age: a key per machine and one on paper · bin/ wrappers decrypt one value at run time", 12, 400, t["muted"])
     s.path(f"M{ax + 250},{by - 2} L{ax + 250},{ay + ah + 3}", t["accent"], 1.6, end=True)
-    s.text(ax + 260, by - 13, "bw get", 11.5, 600, t["accent"])
+    s.text(ax + 260, by - 13, "sops decrypt", 11.5, 600, t["accent"])
 
     ty0 = by
     card(s, cx, ty0, cw, 64, r=12)
@@ -442,13 +442,13 @@ PHASES = ["Accounts", "One command", "Handover", "Foundation", "Environment", "F
 # (step, phase, lane, label, rebuild) — lane: h human · c claude drives, human authenticates · a claude alone
 # rebuild: 1 repeated on every rebuild · 0.5 role-dependent · 0 first machine only
 STEPS = [
-    (1, 0, "h", "Claude plan", 0), (2, 0, "h", "GitHub", 0), (3, 0, "h", "Tailscale", 0), (4, 0, "h", "Bitwarden", 0),
+    (1, 0, "h", "Claude plan", 0), (2, 0, "h", "GitHub", 0), (3, 0, "h", "Tailscale", 0), (4, 0, "h", "Passwords app", 0),
     (5, 0, "h", "Cloudflare", 0), (6, 0, "h", "Research keys", 0), (7, 0, "h", "PostHog", 0),
     (8, 0, "h", "Telegram bot", 0), (9, 0, "h", "Google OAuth", 0),
     (10, 1, "h", "xcode-select", 1), (11, 1, "h", "Homebrew", 1), (12, 1, "h", "gh auth login", 1), (13, 1, "h", "Claude Code", 1),
     (14, 2, "h", "Create or clone", 1),
     (15, 3, "a", "Identify host", 1), (16, 3, "c", "SSH key", 1), (17, 3, "c", "Tailscale login", 1),
-    (18, 3, "h", "bw login", 1), (19, 3, "a", "Link ~/.claude", 1), (20, 3, "a", "Hooks live", 1),
+    (18, 3, "c", "age key · admit", 1), (19, 3, "a", "Link ~/.claude", 1), (20, 3, "a", "Hooks live", 1),
     (21, 4, "a", "brew bundle", 1), (22, 4, "a", "Dotfiles", 1), (23, 4, "h", "Extensions", 0),
     (24, 4, "a", "Runtimes", 0), (25, 4, "a", "bin/ wrappers", 0), (26, 4, "a", "tg-send hello", 0),
     (27, 4, "h", "Google consent", 0.5), (28, 4, "h", "Time Machine", 0),
@@ -589,7 +589,7 @@ def draw_loop(t: dict) -> str:
              "Hooks make the sync automatic; ownership rules make conflicts rare by construction.")
 
     stages = [
-        ("SessionStart hook", "automatic", ["git pull --rebase", "Bitwarden locked?", "tasks-sync"], "a"),
+        ("SessionStart hook", "automatic", ["git pull --rebase", "secrets status", "tasks-sync"], "a"),
         ("Orient", "CLAUDE.md", ["identify host", "machines/<host>.md", "FLEET.md"], "a"),
         ("Work", "you decide", ["install, configure,", "manage boxes over SSH", "ask before destructive"], "c"),
         ("Record", "same session", ["update machines/<host>.md", "append DECISIONS.md", "TASKS.md · map-check"], "a"),
@@ -692,7 +692,7 @@ def draw_forms(t: dict) -> str:
           "06:30|daily note", "09:00|map-check", "weekly|library-push"], "r2", "lines"),
     ]
     groups = [
-        ("plumbing", ["secrets-unlock", "vault-setup", "tg-send", "tasks-sync", "map-check", "security-check", "schedule"]),
+        ("plumbing", ["secrets", "vault-setup", "tg-send", "tasks-sync", "map-check", "security-check", "schedule"]),
         ("research", ["tavily", "exa", "firecrawl", "jina", "browse"]),
         ("google", ["gcal", "gmail", "gdrive"]),
         ("storage", ["archive-push", "archive-pull", "camera-ingest", "library-push", "resources-sync"]),
@@ -799,7 +799,7 @@ def draw_forms(t: dict) -> str:
                 s.text(xx + w / 2, row_y + 15, n, 11.5, 550, t["ink"], "middle", mono=True)
                 xx += w + CHIP_GAP
 
-    s.text(bx + 26, by + footer_rel, "Keys via bw get · output prefixed [host] · exit codes, not prose", 12, 500,
+    s.text(bx + 26, by + footer_rel, "Keys via sops · output prefixed [host] · exit codes, not prose", 12, 500,
            t["muted"])
     s.h = canvas_h
     return s.render()
@@ -815,7 +815,7 @@ def draw_hero(t: dict) -> str:
             "A terminal with the one command a human pastes — the installer one-liner, which puts the Xcode command "
             "line tools, Homebrew, the GitHub CLI and Claude Code on the machine and creates their private copy of "
             "the template — and then the handover: cd into that copy, start Claude Code, paste the first prompt. "
-            "Beside it, the list of what Claude Code then sets up: machine map, keys, Tailscale, Bitwarden, hooks, "
+            "Beside it, the list of what Claude Code then sets up: machine map, keys, Tailscale, secrets, hooks, "
             "Brewfiles, brains, workflows. The four commands can still be typed by hand.")
     s.text(48, 78, "claude-computer", 12, 700, t["accent"], ls="0.16em", upper=True)
     s.text(46, 136, "Install the", 48, 700, ls="-0.02em")
@@ -862,7 +862,7 @@ def draw_hero(t: dict) -> str:
     cw = W - 48 - cx
     card(s, cx, cy, cw, th)
     s.text(cx + 22, cy + 34, "Then Claude Code", 14.5, 700)
-    items = ["maps the machine", "adds its SSH key", "joins the tailnet", "wires Bitwarden",
+    items = ["maps the machine", "adds its SSH key", "joins the tailnet", "makes its age key",
              "links hooks + commands", "installs by role", "builds the brains", "files your meetings"]
     for i, it in enumerate(items):
         y = cy + 72 + i * 31
