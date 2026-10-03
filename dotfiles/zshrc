@@ -40,7 +40,6 @@ done
 alias ll='eza -l --git --group-directories-first'
 alias lg='lazygit'
 alias cchome='cd "$CC_HOME"'
-alias unlock='eval "$(secrets-unlock --export)"'
 
 export EDITOR="code --wait"
 

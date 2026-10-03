@@ -36,7 +36,6 @@ token.json
 keys.txt
 .secrets/
 rclone.conf
-bw-session*
 
 # Browser profiles hold logged-in sessions — never in a repo
 **/browse/profiles/

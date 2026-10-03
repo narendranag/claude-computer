@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Removed
+
+- **Bitwarden.** `bitwarden-cli` and the `bitwarden` cask leave the `Brewfile`; `bin/secrets-unlock`, the `unlock` alias in `dotfiles/zshrc`, the `bw` and `secrets-unlock` permission rules and the `bw-session*` ignore go with them. Machine secrets are in the sops store (`bin/secrets`); human logins belong in whatever password manager you use, which the template no longer installs. `age` and `sops` move from "Optional" to "Needed by the setup itself". An upgraded machine keeps Bitwarden installed until you `brew uninstall bitwarden-cli` (and the cask, if you want); `map-check` reports them as unrecorded until then.
+
 ### Added
 
 - **`bin/secrets` and a sops + age secret store**, alongside Bitwarden for now. `secrets/secrets.yaml` in the private instance holds every machine secret as `<name>.<field>`, encrypted to each manager's age key and a paper backup key; `secrets/secrets.example.yaml` is its shape and `secrets/README.md` the rules. Subcommands: `status` and `check` (no decryption), `init [--first]`, `set` (hidden prompt, stdin or `--from-file`), `import-env` (a dotenv file in one pass — names and counts only, `--dry-run`, `--map`), `recipients` (generates `.sops.yaml` from each machine file's `age_recipient:`), `admit`, `revoke` (re-encrypts, rotates the data key, lists what to rotate at providers), `backup-key` and `backup-verify` (terminal only), `env` and `exec --only NAME,… -- <cmd>` (secrets as environment variables for one command). `push` for headless boxes is designed, not built. `lib/common.sh` gains `cc_sops_get`/`cc_sops_set` and friends. `tests/secrets.sh` runs it end to end on throwaway keys in a hermetic HOME — two machines, admit, revoke, import-env, exec, the paper key through a pty, argv logging, gitleaks — and CI installs age, sops 3.11.0 (the floor) and gitleaks to run it. `.gitignore` ships only the store's README and example.

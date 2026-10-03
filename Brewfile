@@ -7,7 +7,8 @@ tap "domt4/autoupdate"                  # `brew autoupdate start 86400 --upgrade
 
 # --- Needed by the setup itself ---------------------------------------------
 brew "gh"
-brew "bitwarden-cli"                    # `bw` — the only secret store
+brew "age"                              # one key per machine for the secrets store
+brew "sops"                             # secrets/secrets.yaml: names in clear, values encrypted
 brew "gitleaks"                         # pre-commit secret scan
 brew "rclone"                           # R2: archive, camera cold copy, resources (crypt)
 brew "mas"                              # Mac App Store CLI
@@ -57,15 +58,10 @@ brew "poppler"
 brew "exiftool"
 brew "ocrmypdf"
 
-# --- Optional: encryption — nothing in the setup uses these yet -------------
-brew "age"                              # file encryption
-brew "sops"                             # encrypted config files
-
 # --- Apps -------------------------------------------------------------------
 cask "claude-code"                      # installed in Phase 1; listed so rebuilds match
 cask "ghostty"
 cask "tailscale-app"
-cask "bitwarden"
 cask "google-chrome"
 cask "visual-studio-code"
 cask "obsidian"
