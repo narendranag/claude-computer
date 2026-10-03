@@ -6,13 +6,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-04
+
+Bitwarden leaves; machine secrets move into one sops + age file in your private instance, read by the wrappers and never by Claude. A plaintext dotenv file moves in with one command, and projects get their secrets through `secrets exec`.
+
 ### Removed
 
 - **Bitwarden.** `bitwarden-cli` and the `bitwarden` cask leave the `Brewfile`; `bin/secrets-unlock`, the `unlock` alias in `dotfiles/zshrc`, the `bw` and `secrets-unlock` permission rules and the `bw-session*` ignore go with them. Machine secrets are in the sops store (`bin/secrets`); human logins belong in whatever password manager you use, which the template no longer installs. `age` and `sops` move from "Optional" to "Needed by the setup itself". An upgraded machine keeps Bitwarden installed until you `brew uninstall bitwarden-cli` (and the cask, if you want); `map-check` reports them as unrecorded until then.
 
 ### Added
 
-- **`bin/secrets` and a sops + age secret store**, alongside Bitwarden for now. `secrets/secrets.yaml` in the private instance holds every machine secret as `<name>.<field>`, encrypted to each manager's age key and a paper backup key; `secrets/secrets.example.yaml` is its shape and `secrets/README.md` the rules. Subcommands: `status` and `check` (no decryption), `init [--first]`, `set` (hidden prompt, stdin or `--from-file`), `import-env` (a dotenv file in one pass — names and counts only, `--dry-run`, `--map`), `recipients` (generates `.sops.yaml` from each machine file's `age_recipient:`), `admit`, `revoke` (re-encrypts, rotates the data key, lists what to rotate at providers), `backup-key` and `backup-verify` (terminal only), `env` and `exec --only NAME,… -- <cmd>` (secrets as environment variables for one command). `push` for headless boxes is designed, not built. `lib/common.sh` gains `cc_sops_get`/`cc_sops_set` and friends. `tests/secrets.sh` runs it end to end on throwaway keys in a hermetic HOME — two machines, admit, revoke, import-env, exec, the paper key through a pty, argv logging, gitleaks — and CI installs age, sops 3.11.0 (the floor) and gitleaks to run it. `.gitignore` ships only the store's README and example.
+- **`bin/secrets` and a sops + age secret store.** `secrets/secrets.yaml` in the private instance holds every machine secret as `<name>.<field>`, encrypted to each manager's age key and a paper backup key; `secrets/secrets.example.yaml` is its shape and `secrets/README.md` the rules. Subcommands: `status` and `check` (no decryption), `init [--first]`, `set` (hidden prompt, stdin or `--from-file`), `import-env` (a dotenv file in one pass — names and counts only, `--dry-run`, `--map`), `recipients` (generates `.sops.yaml` from each machine file's `age_recipient:`), `admit`, `revoke` (re-encrypts, rotates the data key, lists what to rotate at providers), `backup-key` and `backup-verify` (terminal only), `env` and `exec --only NAME,… -- <cmd>` (secrets as environment variables for one command). `push` for headless boxes is designed, not built. `lib/common.sh` gains `cc_sops_get`/`cc_sops_set` and friends. `tests/secrets.sh` runs it end to end on throwaway keys in a hermetic HOME — two machines, admit, revoke, import-env, exec, the paper key through a pty, argv logging, gitleaks — and CI installs age, sops 3.11.0 (the floor) and gitleaks to run it. `.gitignore` ships only the store's README and example.
 
 - `security-check` gains three checks: `age-key` (mode 600 in a 700 directory, outside any git work tree, one key only — the paper backup key on disk fails — and no age private key committed in the instance), `secrets-encrypted` (every non-empty value in `secrets/secrets.yaml` and `secrets/hosts/*.yaml` is `ENC[…]`; names the offending paths, never a value) and `instance-remote` (the instance's own origin is not public; the template is exempt). `map-check` gains `secrets`: this machine's key matches its `age_recipient:`, `.sops.yaml` matches the machine files and `backup.pub`, and the store is encrypted to exactly those recipients, so a pending `admit` or `revoke` shows as drift. Neither decrypts anything. Both are covered in `tests/secrets.sh`.
 
@@ -36,6 +40,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - **The Google OAuth token no longer passes through a command line.** `lib/cc.py`'s `set_note()` handed the base64-encoded token, refresh token included, to `bw create`/`bw edit` as an argument, readable by any process through `ps` — against the repo's own rule. The token now goes to `secrets set` on stdin.
 - **The Google token is refreshed in memory and written back only when Google issues a new refresh token** (or after the first consent), through `secrets set`, which commits. Writing it after every hourly refresh would have committed the store once an hour on every machine, each commit conflicting with the others. `tests/secrets.sh` checks both paths with fake google-auth modules.
 - `Brewfile.dev` installs `cloudflare-wrangler`, Homebrew's name for Wrangler. It listed `brew "wrangler"`, which is not a formula, so `brew bundle --file Brewfile.dev` failed on that line. The command is still `wrangler`.
+
+### Migrating from 0.4
+
+Doc-only: nothing moves your Bitwarden items for you. On each machine, after `/upstream` brings 0.5.0 into your instance:
+
+1. **`.gitignore`.** Delete the secrets-store block (`# The secrets store` … `# end of the secrets-store block`) and any bare `secrets/` line left from 0.4, so `secrets/secrets.yaml`, `secrets/backup.pub` and `.sops.yaml` can be committed. Your instance must be private: `security-check` now fails `instance-remote` if it isn't.
+2. **Tools.** `brew install age sops` (sops 3.11 or newer) — `brew bundle` does it.
+3. **Keys.** On one manager, `secrets init --first`; then, in a terminal, `secrets backup-key` (write the paper key down twice, keep the sheets apart) and `secrets backup-verify`. On every other manager, `secrets init`, then `git pull && secrets admit <host>` on the first, then `git pull`.
+4. **Values.** For each Bitwarden item, `secrets set <name>.<field>` in a terminal; the mapping is in [`docs/SECRETS.md`](docs/SECRETS.md#migrating-from-bitwarden-04--05). Keys in a plaintext dotenv file go in with `secrets import-env <file> --dry-run`, then without `--dry-run`. Don't copy `google-token`: the next `gcal` asks for consent and stores a fresh one. `secrets check` shows what's left.
+5. **Shell and projects.** Drop any `unlock` alias or `BW_SESSION` export from your own dotfiles, replace `source <dotenv>` with `secrets exec --only NAME,… -- <cmd>`, and in apps' `.envrc` replace `bw get` with `secrets env --only …`.
+6. **Clean up.** `brew uninstall bitwarden-cli` (and the `bitwarden` cask if you don't use the app); delete the old Keychain item with `security delete-generic-password -s claude-computer-bw-session`; record `age_recipient`, the key under **Keys** and `~/.config/sops/age/` under **Sensitive locations** in your machine file (`secrets init` writes the first); `map-check` should then be clean.
 
 ## [0.4.0] — 2026-10-03
 
@@ -185,7 +200,8 @@ First public release.
 - README with hand-drawn light/dark diagrams generated by `docs/diagrams/render.py`.
 - Permission mode: auto, with explicit ask and deny rules.
 
-[Unreleased]: https://github.com/narendranag/claude-computer/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/narendranag/claude-computer/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/narendranag/claude-computer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/narendranag/claude-computer/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/narendranag/claude-computer/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/narendranag/claude-computer/compare/v0.3.0...v0.3.1
