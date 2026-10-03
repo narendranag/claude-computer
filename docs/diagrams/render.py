@@ -233,6 +233,7 @@ class Row:
 
 MAP_ROWS = [
     Row("claude-computer/", "the fleet brain · one clone per manager", True, True, "git"),
+    Row("clients/*", "one private repo each · brief/ tracked", True, True, "git"),
     Row("projects/*", "active work · one repo each", True, True, "git"),
     Row("_scratch/", "disposable · swept monthly", False, False, "local", 1),
     Row("products/*", "graduated · in production", True, True, "git"),
@@ -247,7 +248,7 @@ SYNC_LABEL = {"git": "git", "r2": "R2 →", "crypt": "R2 ⇄ crypt", "local": "l
 
 
 def draw_map(t: dict) -> str:
-    W, H = 1280, 940
+    W, H = 1280, 992
     s = SVG(W, H, t, "The map",
             "Folders in the home directory, what each has (brain, repo), how each syncs (git to GitHub, rclone to "
             "Cloudflare R2, encrypted two-way for resources), and the fleet: manager machines on a Tailscale tailnet "
@@ -322,7 +323,7 @@ def draw_map(t: dict) -> str:
     s.text(bx + 50, gy + 33, "GitHub", 16, 650)
     repos = [
         ("claude-computer", "private · the instance", "inst"),
-        ("projects, products,", "personal, vault · private", "proj"),
+        ("clients, projects,", "products, personal, vault · private", "proj"),
         ("this template", "public · new instances start here", "tmpl"),
     ]
     gh_anchor = {}
@@ -367,13 +368,13 @@ def draw_map(t: dict) -> str:
 
     conn(0, gh_anchor["inst"], t["git"], both=True)
     px_, py_ = gh_anchor["proj"]
-    for k, i in enumerate((1, 3, 4, 5)):
-        conn(i, (px_, py_ - 12 + k * 8), t["git"], both=True)
-    conn(6, r2_anchor["arch"], t["r2"])
+    for k, i in enumerate((1, 2, 4, 5, 6)):
+        conn(i, (px_, py_ - 16 + k * 8), t["git"], both=True)
+    conn(7, r2_anchor["arch"], t["r2"])
     lx_, ly_ = r2_anchor["lib"]
-    conn(7, (lx_, ly_ - 5), t["r2"])
-    conn(8, (lx_, ly_ + 5), t["r2"])
-    conn(9, r2_anchor["res"], t["crypt"], dash="5 4", both=True)
+    conn(8, (lx_, ly_ - 5), t["r2"])
+    conn(9, (lx_, ly_ + 5), t["r2"])
+    conn(10, r2_anchor["res"], t["crypt"], dash="5 4", both=True)
     s.text(655, 262, "pull · push", 11, 600, t["git"], "middle")
     s.text(655, 590, "rclone", 11, 600, t["r2"], "middle")
 

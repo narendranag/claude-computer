@@ -4,7 +4,7 @@
 # Usage:
 #   new-app <web|mobile|cli|desktop> <name> [--dir PARENT] [--no-remote] [--dry-run]
 #
-#   --dir PARENT   where to create it (default ~/projects)
+#   --dir PARENT   where to create it (default ~/projects; code for a client: ~/clients/<client>)
 #   --no-remote    skip `gh repo create --private`
 #   --dry-run      print the steps, change nothing
 #
@@ -81,6 +81,17 @@ if [ "$dry" -eq 0 ]; then
     sed -i '' "s/__NAME__/$name/g" "$f" 2>/dev/null || sed -i "s/__NAME__/$name/g" "$f" || fail=1
   done < <(grep -rlI '__NAME__' "$dir" --exclude-dir=node_modules --exclude-dir=.venv 2>/dev/null)
   [ "$fail" -eq 0 ] || cc_die "$EX_FAIL" "could not substitute the project name in $dir"
+fi
+
+# A client folder is its own repo; a code repo inside it is a separate repo, so the client's
+# repo must not track it.
+if [ -d "$parent/.git" ]; then
+  step "ignore $name/ in the enclosing repo $parent"
+  if [ "$dry" -eq 0 ] && ! grep -qxF "/$name/" "$parent/.gitignore" 2>/dev/null; then
+    printf '/%s/\n' "$name" >> "$parent/.gitignore"
+    git -C "$parent" add .gitignore
+    git -C "$parent" commit -q -m "chore: ignore $name/, its own repo" -- .gitignore || exit "$EX_FAIL"
+  fi
 fi
 
 step "git init + secret-scan hook + first commit"

@@ -1,0 +1,12 @@
+
+# --- claude-computer template: client ---
+.DS_Store
+.env
+.env.*
+.dev.vars
+.envrc.local
+node_modules/
+.venv/
+__pycache__/
+# Code repos inside this client folder are listed below by new-client and new-app;
+# each is its own repo.

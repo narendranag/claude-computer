@@ -76,6 +76,11 @@ jobs:
       - name: library-push matrix
         run: ./tests/library-push.sh
 
+      # new-client turns a client folder into a private repo; git is real, gh and gitleaks are
+      # stubs, so nothing reaches GitHub.
+      - name: new-client matrix
+        run: ./tests/new-client.sh
+
       # setup-tools.sh --only vscode and --only agent-reach; `code`, `uv` and `npm` are stubs,
       # so nothing is ever installed.
       - name: setup-tools.sh dry-run and failure matrix

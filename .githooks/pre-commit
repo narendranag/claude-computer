@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pre-commit — block commits that contain secrets. Installed by /setup and bin/new-app:
+# pre-commit — block commits that contain secrets. Installed by /setup, bin/new-app and bin/new-client:
 #   git config core.hooksPath .githooks      (this repo)
 #   cp .githooks/pre-commit .git/hooks/      (new apps)
 set -euo pipefail

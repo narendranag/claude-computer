@@ -10,7 +10,6 @@ brew "gh"
 brew "bitwarden-cli"                    # `bw` — the only secret store
 brew "gitleaks"                         # pre-commit secret scan
 brew "rclone"                           # R2: archive, camera cold copy, resources (crypt)
-brew "syncthing"                        # two-way folder sync between own machines
 brew "mas"                              # Mac App Store CLI
 brew "jq"                               # every hook parses its input with it
 brew "coreutils"                        # gtimeout, used by the session-start and stop hooks
@@ -75,7 +74,6 @@ cask "telegram"
 cask "iina"
 cask "libreoffice"                      # headless document conversion as a build tool
 cask "macparakeet" if Hardware::CPU.arm? # on-device dictation + transcription → vault inbox; Apple silicon, macOS 14+
-cask "syncthing-app"
 cask "font-jetbrains-mono-nerd-font"
 cask "qlmarkdown"                       # Quick Look: markdown
 cask "syntax-highlight"                 # Quick Look: source code

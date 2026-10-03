@@ -9,7 +9,7 @@
 # Checks: FileVault / disk encryption · firewall · sshd state matches the machine's role ·
 #         password SSH disabled wherever sshd runs · browse profiles private ·
 #         Agent Reach's config (cookies, keys) private ·
-#         the vault's GitHub remote is not public · Tailscale up.
+#         the vault's and every client repo's GitHub remote is not public · Tailscale up.
 #
 # Self-contained on purpose (no lib/ sourcing) so it can be piped to a box over SSH.
 # Output: one line per check, "PASS|FAIL|SKIP <check> — <detail>", prefixed with [<host>].
@@ -177,6 +177,35 @@ else
       *)                 report SKIP vault-remote "could not read visibility of $slug" ;;
     esac
   fi
+fi
+
+
+# --- Client repos must be private --------------------------------------------
+# A client folder is a repo holding the client's own documents (brief/). `new-client` creates it
+# private; a hand-made remote or a flipped setting is what this catches.
+clients="${CC_CLIENTS:-$HOME/clients}"
+found=0; public=""; unknown=""
+for d in "$clients"/*/; do
+  [ -d "$d.git" ] || continue
+  found=$((found + 1))
+  origin="$(git -C "$d" remote get-url origin 2>/dev/null || true)"
+  [ -n "$origin" ] || continue
+  command -v gh >/dev/null 2>&1 || { unknown="$unknown $(basename "$d")"; continue; }
+  slug="$(printf '%s' "$origin" | sed -e 's#^.*github\.com[:/]##' -e 's#\.git$##')"
+  case "$(gh repo view "$slug" --json visibility --jq .visibility 2>/dev/null || true)" in
+    PUBLIC) public="$public $slug" ;;
+    PRIVATE|INTERNAL) ;;
+    *) unknown="$unknown $slug" ;;
+  esac
+done
+if [ "$found" -eq 0 ]; then
+  report SKIP client-remotes "no client repos in $clients"
+elif [ -n "$public" ]; then
+  report FAIL client-remotes "PUBLIC:$public — client documents are on the open internet"
+elif [ -n "$unknown" ]; then
+  report SKIP client-remotes "could not read visibility of:$unknown"
+else
+  report PASS client-remotes "$found client repos, none public"
 fi
 
 # --- Tailscale -------------------------------------------------------------

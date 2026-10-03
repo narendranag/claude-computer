@@ -82,7 +82,7 @@ The human keeps three jobs:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/map-dark.svg">
-  <img alt="Diagram of the home directory: claude-computer, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books, comics sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. Bitwarden feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
+  <img alt="Diagram of the home directory: claude-computer, clients, projects, products, personal and vault sync with git to GitHub; archive, library/camera and library/books, comics sync one-way to Cloudflare R2; resources syncs two-way, encrypted. Manager machines on a Tailscale tailnet reach headless boxes over SSH. Bitwarden feeds every script; Telegram receives from every machine." src="docs/diagrams/map.svg" width="100%">
 </picture>
 
 The home directory gets a handful of top-level folders that sit beside the macOS defaults, not instead of them:
@@ -90,16 +90,19 @@ The home directory gets a handful of top-level folders that sit beside the macOS
 ```text
 ~/
   claude-computer/     the fleet brain — repo
-  projects/           active work — one repo per project (+ _scratch/, disposable)
-  products/           projects that graduated to production — one repo each
-  personal/           finance, personal projects — one repo each
-  vault/              Obsidian second brain — repo
-  archive/            cold storage staging — pushed to object storage, then removed
-  library/            camera (RAW workflow), books and comics (Calibre)
-  resources/<person>/ family key documents — encrypted two-way sync
+  clients/<name>/      one private repo per client — brief/ is tracked
+  projects/            active work — one repo per project (+ _scratch/, disposable)
+  products/            projects that graduated to production — one repo each
+  personal/            finance, personal projects — one repo each
+  vault/               Obsidian second brain — repo
+  archive/             cold storage staging — pushed to object storage, then removed
+  library/             camera (RAW workflow), books and comics (Calibre)
+  resources/<person>/  family key documents — encrypted two-way sync
 ```
 
-**Top-level folders are containers, not repos** (except `claude-computer` and `vault`). Repos live one level down. Nothing is ever nested.
+**Top-level folders are containers, not repos** (except `claude-computer` and `vault`). Repos live one level down; a folder there with no `CLAUDE.md` may group the repos of one thing — a product with a site and an API.
+
+**A client folder is a repo of its own**, so the client's documents in `brief/` are versioned and backed up like code, and never live on one machine only. Code built for that client is a separate repo inside the client's folder, which the client repo ignores. `new-client <name>` makes one; `new-app <type> <name> --dir ~/clients/<client>` adds the code.
 
 **The brain-per-folder rule.** Any folder that needs automation gets its own `CLAUDE.md` — a _brain_ — and a `TASKS.md`. You start Claude in the folder where the work is; that brain says what to do _here_, and points to `~/claude-computer/docs/` for what the system looks like. `archive/` has a brain whose two jobs are archive and retrieve. `library/camera` has one that ingests cards and finds photos by metadata. `resources/` has one that OCRs scans and tracks passport expiry dates. Folders that just hold files have no brain.
 
@@ -110,10 +113,9 @@ The home directory gets a handful of top-level folders that sit beside the macOS
 | Brains, code, the vault                  | git → GitHub                                  | versioned, mergeable, works everywhere                                                                             |
 | Archive, camera cold copy, books, comics | `rclone` → Cloudflare R2, one-way             | cheap object storage with no egress fees; the archive index is rebuilt from the bucket, so there's nothing to sync |
 | Family documents                         | `rclone bisync` over an `rclone crypt` remote | two-way, and passport scans never sit in plain object storage                                                      |
-| A working folder between my own machines | Syncthing                                     | peer-to-peer, no cloud                                                                                             |
 | A file for someone else                  | Google Drive, or an R2 presigned link         | sharing is a separate job from syncing                                                                             |
 
-**Why no Dropbox.** Every job it would do is covered above, and a second sync engine brings its own conflict rules, its own selective-sync state and its own idea of what "deleted" means. Same for iCloud Drive on working folders. The one real gap is arbitrary files on a phone; I accept that the phone gets the vault, not the filesystem.
+**Why no Dropbox, and no Syncthing.** Every job they would do is covered above, and a second sync engine brings its own conflict rules, its own selective-sync state and its own idea of what "deleted" means. Two-way sync of a folder full of git repos is worse: two machines writing the same `.git` can corrupt it, and a deletion on one machine is a deletion on all of them. Same for iCloud Drive on working folders. The one real gap is arbitrary files on a phone; I accept that the phone gets the vault, not the filesystem.
 
 ## The build
 

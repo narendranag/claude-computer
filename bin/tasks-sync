@@ -5,7 +5,9 @@
 # ///
 """tasks-sync — collect TASKS.md from every brain into read-only copies in the vault.
 
-A brain is any folder with a CLAUDE.md. Each brain's TASKS.md is the source of truth;
+A brain is any folder with a CLAUDE.md: the fixed ones (claude-computer, archive, vault, resources,
+library/camera), every folder in clients/, projects/, products/ and personal/, the code repos inside a
+client's folder, and one level into a plain folder that only groups repos. Each brain's TASKS.md is the source of truth;
 this script only reads them and writes generated copies:
 
   <vault>/maps/tasks.md               every open task by brain, Now first, overdue flagged
@@ -58,7 +60,8 @@ DUE_RE = re.compile(r"📅\s*(\d{4}-\d{2}-\d{2})")
 DONE_RE = re.compile(r"✅\s*(\d{4}-\d{2}-\d{2})")
 TAG_RE = re.compile(r"(?<!\S)#([\w/-]+)")
 FIXED_BRAINS = ("claude-computer", "archive", "vault", "resources", "library/camera")
-CONTAINERS = ("projects", "products", "personal")
+CONTAINERS = ("clients", "projects", "products", "personal")
+SKIP = ("_scratch",)
 RECENT_DONE_DAYS = 7
 
 
@@ -74,18 +77,32 @@ class Task:
     overdue: bool = False
 
 
+def subdirs(base: Path) -> list[Path]:
+    if not base.is_dir():
+        return []
+    return sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith(".") and p.name not in SKIP)
+
+
 def find_brains(home: Path) -> list[tuple[str, Path]]:
     dirs = [home / b for b in FIXED_BRAINS]
     for c in CONTAINERS:
-        base = home / c
-        if base.is_dir():
-            dirs += sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith("."))
+        for p in subdirs(home / c):
+            if (p / "CLAUDE.md").is_file():
+                dirs.append(p)
+                # A client folder is a repo whose code lives in separate repos inside it.
+                if c == "clients":
+                    dirs += [q for q in subdirs(p) if (q / ".git").exists()]
+            elif not (p / ".git").exists():
+                # A plain folder grouping the repos of one thing (a site and an API): look one level in.
+                # A repo without a CLAUDE.md is not a brain, and its subfolders are its own business.
+                dirs += subdirs(p)
     brains = [d for d in dirs if (d / "CLAUDE.md").is_file()]
-    # Name = folder name; prefix the container when two brains share a name.
+    # Name = folder name. When two brains share one, every one of them is named by its path from the
+    # home folder (projects-acme-site, products-acme-site), so none can overwrite another.
     names = [d.name for d in brains]
     out = []
     for d in brains:
-        name = d.name if names.count(d.name) == 1 else f"{d.parent.name}-{d.name}"
+        name = d.name if names.count(d.name) == 1 else "-".join(d.relative_to(home).parts)
         out.append((name, d))
     return out
 

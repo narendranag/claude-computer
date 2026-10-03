@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# new-client — make ~/clients/<name> a private repo: create it from templates/client, or adopt a
+# folder that already exists there.
+#
+# Usage:
+#   new-client <name> [--dir PARENT] [--repo NAME] [--no-remote] [--dry-run]
+#
+#   <name>         the folder name (an existing folder keeps its spelling, e.g. Northwind)
+#   --dir PARENT   where client folders live (default ~/clients)
+#   --repo NAME    GitHub repo name (default client-<name>, lowercased)
+#   --no-remote    skip `gh repo create --private`
+#   --dry-run      print what would happen, change nothing
+#
+# New folder: copy templates/client (CLAUDE.md, TASKS.md, brief/, .gitignore), substitute __NAME__.
+# Existing folder: add only the template files it lacks, append the template's .gitignore once, and
+# create brief/ if missing; nothing already there is moved or overwritten.
+# Either way: every git repo anywhere inside the folder is added to .gitignore (it is its own repo),
+# then git init, the secret-scan pre-commit hook, a first commit, and gh repo create --private --push.
+#
+# Stops before committing if a file that would be committed is over CC_MAX_FILE_MB (default 95 MB;
+# GitHub rejects files over 100 MB): add it to .gitignore, or archive it, and run again. If the first
+# commit fails (the secret scan found something), the new .git is removed so a rerun starts clean.
+# If only the GitHub step fails, the local repo is kept and the command to finish is printed.
+#
+# Exit codes: 0 ok · 1 a step failed · 2 usage / already a repo / file too large · 3 missing tool
+set -euo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+cc_wants_help "$@"
+
+name=""; parent="$HOME/clients"; repo=""; remote=1; dry=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dir) parent="${2:?}"; shift 2 ;;
+    --repo) repo="${2:?}"; shift 2 ;;
+    --no-remote) remote=0; shift ;;
+    --dry-run) dry=1; shift ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
+    *) if [ -z "$name" ]; then name="$1"; else cc_usage >&2; exit "$EX_USAGE"; fi; shift ;;
+  esac
+done
+[[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || cc_die "$EX_USAGE" "name must be letters, digits, dots, dashes or underscores"
+[ -n "$repo" ] || repo="client-$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+[[ "$repo" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || cc_die "$EX_USAGE" "repo name must be lowercase: $repo"
+case "$parent" in /*) ;; *) parent="$PWD/$parent" ;; esac
+
+dir="$parent/$name"
+tpl="$CC_ROOT/templates/client"
+max_mb="${CC_MAX_FILE_MB:-95}"
+marker="# --- claude-computer template: client ---"
+[ -d "$tpl" ] || cc_die "$EX_CONFIG" "no template at $tpl"
+[ -e "$dir/.git" ] && cc_die "$EX_USAGE" "$dir is already a git repo"
+[ -e "$dir" ] && [ ! -d "$dir" ] && cc_die "$EX_USAGE" "$dir exists and is not a folder"
+[ "$remote" -eq 0 ] || [ "$dry" -eq 1 ] || cc_need gh
+
+step() { cc_info "→ $*"; }
+
+# .gitignore pattern for a literal path: anchored, with the characters git treats specially escaped.
+ignore_line() { printf '/%s/\n' "$(printf '%s' "$1" | sed -e 's/[][*?\\]/\\&/g')"; }
+
+if [ -d "$dir" ]; then mode="adopt"; else mode="new"; fi
+step "$mode: $dir → github.com/<you>/$repo (private)"
+
+# Repos inside the folder, one relative path per line, at any depth. -prune stops at each one, so a
+# repo inside a repo is that repo's business.
+nested="$(mktemp "${TMPDIR:-/tmp}/new-client.XXXXXX")"
+trap 'rm -f "$nested"' EXIT
+if [ -d "$dir" ]; then
+  find "$dir" -mindepth 2 \( -name node_modules -prune \) -o \( -name .git -print -prune \) 2>/dev/null |
+    while IFS= read -r g; do r="${g#"$dir"/}"; printf '%s\n' "${r%/.git}"; done | sort > "$nested"
+fi
+while IFS= read -r r; do step "ignore the repo inside it: $r/"; done < "$nested"
+
+if [ "$dry" -eq 1 ]; then
+  if [ -d "$dir" ]; then
+    big="$(find "$dir" -type f -size +"$((max_mb * 1024))"k -not -path '*/.git/*' 2>/dev/null |
+      while IFS= read -r f; do printf '  %s\n' "${f#"$dir"/}"; done)"
+    [ -z "$big" ] || cc_info "  files over ${max_mb} MB (the real run stops unless .gitignore covers them):
+$big"
+  fi
+  step "template files (existing files kept; .gitignore appended once)"
+  step "git init + secret-scan hook + first commit"
+  [ "$remote" -eq 0 ] || step "gh repo create $repo --private"
+  step "done (dry run: nothing changed)"
+  exit 0
+fi
+
+step "template files (existing files kept; .gitignore appended once)"
+mkdir -p "$dir"
+fail=0
+while IFS= read -r f; do
+  src="$tpl/$f"; dst="$dir/$f"
+  mkdir -p "$(dirname "$dst")" || { fail=1; continue; }
+  if [ "$(basename "$f")" = ".gitignore" ] && [ -f "$dst" ]; then
+    grep -qxF "$marker" "$dst" || cat "$src" >> "$dst" || fail=1
+  elif [ "$(basename "$f")" = ".gitkeep" ] && [ -n "$(ls -A "$(dirname "$dst")" 2>/dev/null)" ]; then
+    :  # brief/ already has the client's files; no placeholder needed
+  elif [ ! -e "$dst" ]; then
+    cp "$src" "$dst" || fail=1
+  fi
+done < <(cd "$tpl" && find . -type f ! -name '.DS_Store' | sed 's#^\./##')
+while IFS= read -r r; do
+  line="$(ignore_line "$r")"
+  grep -qxF "$line" "$dir/.gitignore" || printf '%s\n' "$line" >> "$dir/.gitignore" || fail=1
+done < "$nested"
+[ "$fail" -eq 0 ] || cc_die "$EX_FAIL" "could not add the template to $dir"
+while IFS= read -r f; do
+  sed -i '' "s/__NAME__/$name/g" "$f" 2>/dev/null || sed -i "s/__NAME__/$name/g" "$f" || fail=1
+done < <(grep -lI '__NAME__' "$dir/CLAUDE.md" "$dir/TASKS.md" 2>/dev/null || true)
+[ "$fail" -eq 0 ] || cc_die "$EX_FAIL" "could not substitute the client name in $dir"
+
+step "git init + secret-scan hook + first commit"
+cd "$dir"
+git init -q -b main
+# Until the first commit lands, a failure removes the .git this run created, so the folder is exactly
+# as adoptable as it was.
+undo() { rm -rf "$dir/.git"; }
+cp "$CC_ROOT/.githooks/pre-commit" .git/hooks/pre-commit
+git add -A || { undo; cc_die "$EX_FAIL" "git add failed in $dir; nothing was committed"; }
+
+# A repo that slipped past the ignore list would be committed as a gitlink: a broken submodule.
+links="$(git ls-files -s | awk '$1 == "160000" { sub(/^[^\t]*\t/, "  "); print }')"
+[ -z "$links" ] || { undo; cc_die "$EX_FAIL" "repos inside $dir would be committed as submodules — add them to .gitignore:
+$links"; }
+
+big=""
+while IFS= read -r -d '' f; do
+  if [ "$(wc -c < "$f")" -gt "$((max_mb * 1024 * 1024))" ]; then big="$big
+  $f"; fi
+done < <(git diff --cached --name-only -z)
+[ -z "$big" ] || { undo; cc_die "$EX_USAGE" "files over ${max_mb} MB, which GitHub rejects — add them to .gitignore or archive them, then run again:$big"; }
+
+n="$(git diff --cached --name-only | wc -l | tr -d ' ')"
+git commit -q -m "chore: client repo for $name ($n files) from the claude-computer template" ||
+  { undo; cc_die "$EX_FAIL" "the first commit failed (see the secret scan above); .git was removed — fix it and run again"; }
+
+if [ "$remote" -eq 1 ]; then
+  step "gh repo create $repo --private"
+  gh repo create "$repo" --private --source "$dir" --remote origin --push ||
+    cc_die "$EX_FAIL" "the local repo is committed but GitHub failed. Fix the cause, then finish with:
+  gh repo create $repo --private --source \"$dir\" --remote origin --push"
+fi
+
+step "done: $dir"
+printf '%s\n' "$dir"

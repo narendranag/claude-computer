@@ -40,4 +40,4 @@ All names start with `claude-computer/` (override with `CC_BW_PREFIX`). Create e
 
 Claude walks you through it; you do every step that touches a credential. Export from the old manager (Apple Passwords: _File → Export_; Chrome: _Password Manager → Settings → Export_; 1Password: `.1pux`; others: CSV), then `bw import <format> <file>`. Claude runs the import command and confirms the item count but never reads the file, then securely deletes the export. Afterwards: install the Bitwarden browser extension and turn off password saving in Chrome and Apple Passwords, so there is one store.
 
-No cloud at all? KeePassXC + Syncthing works; the wrappers would need `keepassxc-cli` in place of `bw`.
+No cloud at all? KeePassXC works; the wrappers would need `keepassxc-cli` in place of `bw`.

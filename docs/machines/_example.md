@@ -44,11 +44,11 @@ User agents in `~/Library/LaunchAgents` and daemons this machine owns, by label.
 
 `<port>` — `<process>` — why. Loopback-only listeners can be omitted.
 
-- `22000` — `syncthing` — file sync
+- `8000` — `uvicorn` — example-app's API, reached over the tailnet
 
 ## Services
 
-- Syncthing: shares `~/projects/_shared` with `example-desktop`
+- example-app API (`uvicorn`, port 8000), started by `local.claude-computer.example-app`
 
 ## Keys
 
