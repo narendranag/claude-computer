@@ -4,6 +4,8 @@
 
 System context: `~/claude-computer/docs/`.
 
+This brain needs darktable, an optional manual install (`/setup` phase 6): Homebrew no longer ships it. If `darktable-cli` is missing, say so before Organise or Find.
+
 ## Layout
 
 ```

@@ -3,7 +3,8 @@
 
 cask "orbstack"                         # Docker for Python services and self-hosted things
                                         # deliberately also in Brewfile.server — one role layer per machine
-cask "darktable"                        # RAW processing (library/camera brain)
+# darktable (RAW processing, library/camera brain) is an optional manual install — /setup phase 6.
+# Homebrew disabled its cask on 2026-09-01: the build fails Gatekeeper.
 cask "calibre"                          # books and comics libraries
 
 brew "cloudflare-wrangler"              # Cloudflare Workers, D1, R2, DNS

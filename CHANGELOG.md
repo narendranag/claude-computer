@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Changed
+
+- **darktable is an optional manual install**, no longer in `Brewfile.dev`. Homebrew disabled its cask on 2026-09-01 because darktable's macOS build fails Gatekeeper, so `brew bundle --file Brewfile.dev` failed on that line on every machine. Only the camera brain uses it, so `/setup` phase 6 now asks, and on a yes it is a human step: download from darktable.org, then **Open Anyway** under Privacy & Security. The camera brain's `CLAUDE.md` says to flag a missing `darktable-cli`.
+
 ### Fixed
 
 - `Brewfile.dev` installs `cloudflare-wrangler`, Homebrew's name for Wrangler. It listed `brew "wrangler"`, which is not a formula, so `brew bundle --file Brewfile.dev` failed on that line. The command is still `wrangler`.
