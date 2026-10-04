@@ -1,0 +1,17 @@
+// The Worker that serves this app, built by OpenNext (`just deploy` = `pnpm run deploy`).
+// Secrets: `wrangler secret put NAME` (values from the fleet's sops store), never here.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "__NAME__",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".open-next/assets"
+  },
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  }
+}

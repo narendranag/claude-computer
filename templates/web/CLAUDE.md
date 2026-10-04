@@ -20,11 +20,11 @@ Deviations from DEV-GUIDELINES: _none_
 
 ## Run
 
-`just setup` · `just run` · `just test` (vitest) · `just e2e` (Playwright, bundled Chromium) · `just lint`
+`just setup` · `just run` · `just test` (vitest) · `just e2e` (Playwright, bundled Chromium) · `just lint` · `just preview` · `just deploy`
 
 ## Deploy
 
-Cloudflare via `wrangler` (Vercel as the alternative).
+Cloudflare Workers through OpenNext (`@opennextjs/cloudflare`): `just preview` runs the production build under Cloudflare's runtime, `just deploy` builds and deploys (`wrangler.jsonc`, `open-next.config.ts`). Plain `wrangler deploy` cannot run Next.js. Vercel is the alternative.
 
 Secrets come from the fleet's sops store: `secrets exec --only NAME,… -- <cmd>` locally (or `.envrc` + direnv with `secrets env`), and into deploy targets with the platform's secret command. Never committed, never in a `.env`.
 

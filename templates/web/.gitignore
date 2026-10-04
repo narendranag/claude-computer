@@ -6,6 +6,8 @@
 .env.*
 !.env.example
 .wrangler/
+.open-next/
+.dev.vars
 .next/
 test-results/
 playwright-report/
