@@ -17,6 +17,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 ### Fixed
 
 - **No more startup warning about `Write(~/.config/sops/**)`.** Claude Code matches only `Edit(path)` rules for file writes, so the `Write(...)` deny rule never matched anything and was reported at every start. It is removed; `Edit(~/.config/sops/**)` was already in the deny list, so no protection is lost.
+- **`rm-guard` no longer asks about every chained command that contains `rm`.** Each simple command in a chain is checked; relative paths count after a literal `cd` into a temporary folder; a chain whose every `rm` is safe gets no decision from the hook, so the rest of the chain still goes through the normal permission checks (the hook never allows a whole chain). Heredocs, `$( )`, redirections, `sudo` and `xargs` still ask.
+- **`transcripts-sync` exports every MacParakeet transcript once.** MacParakeet stores ids as 16-byte UUID blobs; the script wrote Python's `b'...'` representation into notes and crashed saving its cursor after the first note, so one transcript was re-exported every run and the rest never were. Ids are now UUID text, the cursor compares by hex, notes written with the old `b'...'` ids are still recognised, and a crash prints one line instead of a traceback.
 
 ## [0.5.0] — 2026-10-04
 
