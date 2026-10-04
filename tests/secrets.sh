@@ -303,14 +303,15 @@ if [ -n "${PY:-}" ]; then
 import json, os
 class Credentials:
     valid, expired = False, True
-    def __init__(self, info): self.refresh_token = info["refresh_token"]
+    def __init__(self, info): self.info, self.refresh_token = info, info["refresh_token"]
     @classmethod
     def from_authorized_user_info(cls, info, scopes): return cls(info)
     def refresh(self, request): self.refresh_token = os.environ.get("FAKE_NEW_REFRESH") or self.refresh_token
-    def to_json(self): return json.dumps({"refresh_token": self.refresh_token})
+    def to_json(self): return json.dumps({**self.info, "refresh_token": self.refresh_token})
 PY
   cp "$REPO/lib/google_auth.py" "$INST/lib/"
-  printf '{"refresh_token": "fake-refresh-1"}' > "$WORK/tok.json"
+  # The stored token must list every scope in google_auth.SCOPES, or credentials() asks for consent again.
+  "$PY" -c 'import json, sys; sys.path[:0] = sys.argv[1:3]; import google_auth; print(json.dumps({"refresh_token": "fake-refresh-1", "scopes": google_auth.SCOPES}))' "$INST/lib" "$F" > "$WORK/tok.json"
   on alpha "$S" set google.token --from-file "$WORK/tok.json"
   c0="$(git -C "$INST" rev-list --count HEAD)"
   gauth() { on alpha env ${1:+FAKE_NEW_REFRESH="$1"} "$PY" -c 'import sys; sys.path[:0] = sys.argv[1:3]; import google_auth; google_auth.credentials()' "$INST/lib" "$F"; }
