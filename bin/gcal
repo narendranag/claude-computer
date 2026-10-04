@@ -6,10 +6,17 @@
 """gcal — Google Calendar from the command line. Markdown out by default.
 
 Usage:
-  gcal list [--days N] [--calendar ID] [--json]     upcoming events (default 7 days, primary)
-  gcal add "title" --start ISO --end ISO [--calendar ID] [--description TEXT]
-                                                    create an event; ISO like 2026-10-01T09:00:00-05:00
-                                                    or a date (2026-10-01) for all-day
+  gcal calendars [--json]                           your calendars: name, id, access
+  gcal list [--days N] [--calendar NAME|ID] [--json]
+                                                    upcoming events (default 7 days) across every calendar
+                                                    shown in Google Calendar; --calendar narrows to one
+  gcal today [--calendar NAME|ID] [--json]          today's events, midnight to midnight, local time
+  gcal search "query" [--back DAYS] [--ahead DAYS] [--calendar NAME|ID] [--json]
+                                                    events matching text in title, description, location or
+                                                    attendees; default a year back and a year ahead
+  gcal add "title" --start ISO --end ISO [--calendar NAME|ID] [--description TEXT]
+                                                    create an event (default: primary); ISO like
+                                                    2026-10-01T09:00:00+05:30, or a date (2026-10-01) for all-day
 
 Auth: OAuth token shared with gmail/gdrive, kept in the secrets store (see lib/google_auth.py).
 Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
@@ -30,19 +37,87 @@ def when(v: str) -> dict:
     return {"date": v} if len(v) == 10 else {"dateTime": v}
 
 
+def calendars(cal) -> list[dict]:
+    items, token = [], None
+    while True:
+        r = cal.calendarList().list(pageToken=token, maxResults=250).execute()
+        items += r.get("items", [])
+        token = r.get("nextPageToken")
+        if not token:
+            return items
+
+
+def pick(cal, name: str | None, default_all: bool) -> list[dict]:
+    """The calendars to read: one by id or (case-insensitive) name, else every visible one."""
+    cals = calendars(cal)
+    if name:
+        if name == "primary":
+            return [next((c for c in cals if c.get("primary")), {"id": "primary", "summary": "primary"})]
+        hit = [c for c in cals if c["id"] == name or c.get("summaryOverride", c.get("summary", "")).lower() == name.lower()]
+        if not hit:
+            raise cc.CCError(cc.EX_USAGE, f"no calendar {name!r} (`gcal calendars` lists them)")
+        return hit[:1]
+    if default_all:
+        return [c for c in cals if c.get("selected", False) and not c.get("hidden", False)] or cals
+    return [next((c for c in cals if c.get("primary")), {"id": "primary", "summary": "primary"})]
+
+
+def label(c: dict) -> str:
+    return c.get("summaryOverride") or c.get("summary") or c["id"]
+
+
+def events(cal, cals: list[dict], t0: dt.datetime, t1: dt.datetime, q: str | None = None) -> list[dict]:
+    out = []
+    for c in cals:
+        token = None
+        while True:
+            r = cal.events().list(calendarId=c["id"], timeMin=t0.isoformat(), timeMax=t1.isoformat(), q=q,
+                                  singleEvents=True, orderBy="startTime", maxResults=250, pageToken=token).execute()
+            out += [{**e, "_calendar": label(c)} for e in r.get("items", [])]
+            token = r.get("nextPageToken")
+            if not token:
+                break
+    return sorted(out, key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
+
+
+def show(items: list[dict], as_json: bool, multi: bool) -> int:
+    if as_json:
+        print(json.dumps(items, indent=2, ensure_ascii=False))
+        return 0
+    if not items:
+        print("(no events)")
+    for e in items:
+        start = e["start"].get("dateTime", e["start"].get("date"))
+        loc = f" — {e['location']}" if e.get("location") else ""
+        where = f" · {e['_calendar']}" if multi else ""
+        print(f"- {start[:16].replace('T', ' ')} **{e.get('summary', '(no title)')}**{loc}{where}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="gcal", add_help=False)
     ap.add_argument("-h", "--help", action="store_true")
     sub = ap.add_subparsers(dest="cmd")
+    cl = sub.add_parser("calendars", add_help=False)
+    cl.add_argument("--json", action="store_true")
     ls = sub.add_parser("list", add_help=False)
     ls.add_argument("--days", type=int, default=7)
-    ls.add_argument("--calendar", default="primary")
+    ls.add_argument("--calendar")
     ls.add_argument("--json", action="store_true")
+    td = sub.add_parser("today", add_help=False)
+    td.add_argument("--calendar")
+    td.add_argument("--json", action="store_true")
+    se = sub.add_parser("search", add_help=False)
+    se.add_argument("query")
+    se.add_argument("--back", type=int, default=365)
+    se.add_argument("--ahead", type=int, default=365)
+    se.add_argument("--calendar")
+    se.add_argument("--json", action="store_true")
     add = sub.add_parser("add", add_help=False)
     add.add_argument("title")
     add.add_argument("--start", required=True)
     add.add_argument("--end", required=True)
-    add.add_argument("--calendar", default="primary")
+    add.add_argument("--calendar")
     add.add_argument("--description", default="")
     try:
         a = ap.parse_args()
@@ -53,23 +128,32 @@ def main() -> int:
         return cc.EX_OK if a.help else cc.EX_USAGE
 
     cal = google_auth.service("calendar", "v3")
-    if a.cmd == "list":
-        now = dt.datetime.now(dt.timezone.utc)
-        items = cal.events().list(
-            calendarId=a.calendar, timeMin=now.isoformat(), timeMax=(now + dt.timedelta(days=a.days)).isoformat(),
-            singleEvents=True, orderBy="startTime", maxResults=250,
-        ).execute().get("items", [])
+    if a.cmd == "calendars":
+        cals = calendars(cal)
         if a.json:
-            print(json.dumps(items, indent=2))
+            print(json.dumps(cals, indent=2, ensure_ascii=False))
             return 0
-        for e in items:
-            start = e["start"].get("dateTime", e["start"].get("date"))
-            loc = f" — {e['location']}" if e.get("location") else ""
-            print(f"- {start[:16].replace('T', ' ')} **{e.get('summary', '(no title)')}**{loc}")
+        for c in sorted(cals, key=lambda c: (not c.get("primary"), label(c).lower())):
+            flags = [x for x in ("primary" if c.get("primary") else "", "hidden" if c.get("hidden") else "",
+                                 "" if c.get("selected") else "not shown") if x]
+            print(f"- **{label(c)}** — {c.get('accessRole')}{' · ' + ', '.join(flags) if flags else ''} — `{c['id']}`")
         return 0
 
+    now = dt.datetime.now().astimezone()
+    if a.cmd in ("list", "today", "search"):
+        cals = pick(cal, a.calendar, default_all=True)
+        if a.cmd == "list":
+            t0, t1, q = now, now + dt.timedelta(days=a.days), None
+        elif a.cmd == "today":
+            t0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            t1, q = t0 + dt.timedelta(days=1), None
+        else:
+            t0, t1, q = now - dt.timedelta(days=a.back), now + dt.timedelta(days=a.ahead), a.query
+        return show(events(cal, cals, t0, t1, q), a.json, multi=len(cals) > 1)
+
+    target = pick(cal, a.calendar, default_all=False)[0]["id"]
     body = {"summary": a.title, "start": when(a.start), "end": when(a.end), "description": a.description}
-    ev = cal.events().insert(calendarId=a.calendar, body=body).execute()
+    ev = cal.events().insert(calendarId=target, body=body).execute()
     print(f"created: {ev.get('htmlLink')}")
     return 0
 

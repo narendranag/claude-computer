@@ -25,6 +25,7 @@ _G = "https://www.googleapis.com/auth/"
 SCOPES = [
     _G + "gmail.modify",            # read, send, draft, label, archive; not permanent delete
     _G + "calendar.events",
+    _G + "calendar.calendarlist.readonly",  # gcal calendars / list across all of them
     _G + "drive",
     _G + "documents",
     _G + "spreadsheets",
