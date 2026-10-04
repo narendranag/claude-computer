@@ -25,6 +25,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Changed
 
+- **`naabu` replaces `nmap` in the Brewfile.** Open-port scanning is the job it does; naabu is one binary with no dependencies, where nmap brought Lua, liblinear and `ndiff` on Homebrew's Python for scripts, service and OS detection the template doesn't use. `nc -z host port` covers a single check.
 - Every template's `.envrc` loads each key on its own (`ENV_VAR=<name>.<field>` pairs through `secrets env --only`): a key not stored yet is reported and skipped, and the rest still load.
 - `docs/DEV-GUIDELINES.md`: every public site gets a cookie banner with Consent Mode denied until Allow; before Allow GA still receives cookieless pings, so a privacy page must not say nothing is sent; PostHog is gated by the same banner or runs cookieless. No secret in any `.env` file.
 - `new-app web` pins `@playwright/test` exactly to `setup-tools.sh`'s `PLAYWRIGHT_VERSION`, so a new project reuses the Chromium build already in the machine's cache instead of downloading another (~200 MB).
