@@ -47,7 +47,7 @@ brew "tlrc"                             # tldr client
 brew "btop"
 brew "tmux"
 brew "watch"
-brew "nmap"
+brew "naabu"                            # open-port scan (`naabu -host H -p 1-1000`); one binary, no deps
 brew "mtr"
 brew "wget"
 
