@@ -19,10 +19,27 @@ import json
 
 import cc
 
+# What one sign-in grants. Changing this list makes the next run ask for consent again
+# (credentials() notices the stored token lacks a scope). each scope is annotated with what needs it.
+_G = "https://www.googleapis.com/auth/"
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/drive",
+    _G + "gmail.modify",            # read, send, draft, label, archive; not permanent delete
+    _G + "calendar.events",
+    _G + "drive",
+    _G + "documents",
+    _G + "spreadsheets",
+    _G + "presentations",
+    _G + "contacts",                # People API
+    _G + "chat.messages",           # Google Chat (Workspace accounts only, Google says)
+    _G + "chat.spaces.readonly",
+    _G + "meetings.space.created",  # Meet: create spaces, read their conferences
+    _G + "meetings.space.readonly",
+    _G + "analytics.readonly",      # Analytics Data API (reports)
+    _G + "analytics.edit",          # Analytics Admin: create properties and data streams
+    _G + "tagmanager.readonly",
+    _G + "tagmanager.edit.containers",         # containers, workspaces, tags, triggers
+    _G + "tagmanager.edit.containerversions",  # create versions
+    _G + "tagmanager.publish",                 # make a version live (always asked about first)
 ]
 
 
@@ -33,7 +50,10 @@ def credentials():
 
     creds = None
     try:
-        creds = Credentials.from_authorized_user_info(json.loads(cc.secret("google", "token")), SCOPES)
+        info = json.loads(cc.secret("google", "token"))
+        # A token granted before SCOPES grew would refresh fine and then fail with 403s: ask again.
+        if set(SCOPES) <= set(info.get("scopes") or []):
+            creds = Credentials.from_authorized_user_info(info, SCOPES)
     except cc.CCError as e:
         if e.code != cc.EX_CONFIG:
             raise

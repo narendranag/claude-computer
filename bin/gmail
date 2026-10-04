@@ -3,12 +3,21 @@
 # requires-python = ">=3.11"
 # dependencies = ["google-api-python-client>=2.150", "google-auth-oauthlib>=1.2"]
 # ///
-"""gmail — read Gmail from the command line (read-only scope).
+"""gmail — read, send and label Gmail from the command line (scope: gmail.modify).
 
 Usage:
   gmail search "query" [-n N] [--json]    Gmail search syntax, e.g. 'from:newsletter@x.com newer_than:1d'
   gmail get <message-id> [--html]         one message as markdown-ish text (headers + body)
   gmail labels                            list labels
+  gmail draft --to A[,B] --subject S (--body TEXT | --body-file PATH|-) [--cc X] [--bcc X] [--reply ID]
+                                          save a draft; prints its id (nothing is sent)
+  gmail send  --to A[,B] --subject S (--body TEXT | --body-file PATH|-) [--cc X] [--bcc X] [--reply ID]
+                                          send now; prints the message id
+  gmail send --draft DRAFT_ID             send a saved draft
+  gmail label ID [ID…] [--add NAME]… [--remove NAME]… [--create]
+                                          change labels by name; --remove INBOX archives, --add STARRED stars,
+                                          --remove UNREAD marks read; --create makes a missing label
+  --reply ID   answer that message: same thread, In-Reply-To/References set, "Re:" added to the subject
 
 Auth: OAuth token shared with gcal/gdrive, kept in the secrets store (see lib/google_auth.py).
 Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
@@ -16,6 +25,7 @@ Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not a
 
 import argparse
 import base64
+from email.message import EmailMessage
 import html
 import json
 import re
@@ -48,6 +58,48 @@ def strip_html(s: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", html.unescape(s)).strip()
 
 
+def compose(svc, a) -> dict:
+    """A Gmail API message body (raw, and threadId for a reply) from the parsed arguments."""
+    if (a.body is None) == (a.body_file is None):
+        raise cc.CCError(cc.EX_USAGE, "give exactly one of --body or --body-file")
+    text = a.body if a.body is not None else (sys.stdin.read() if a.body_file == "-" else Path(a.body_file).read_text())
+    m = EmailMessage()
+    m["To"] = a.to
+    if a.cc:
+        m["Cc"] = a.cc
+    if a.bcc:
+        m["Bcc"] = a.bcc
+    subject, out = a.subject, {}
+    if a.reply:
+        orig = svc.messages().get(userId="me", id=a.reply, format="metadata",
+                                  metadataHeaders=["Message-ID", "References", "Subject"]).execute()
+        mid = header(orig, "Message-ID")
+        if mid:
+            m["In-Reply-To"] = mid
+            m["References"] = (header(orig, "References") + " " + mid).strip()
+        if not subject.lower().startswith("re:"):
+            subject = "Re: " + subject
+        out["threadId"] = orig["threadId"]
+    m["Subject"] = subject
+    m.set_content(text)
+    out["raw"] = base64.urlsafe_b64encode(m.as_bytes()).decode()
+    return out
+
+
+def label_ids(svc, names: list[str], create: bool) -> list[str]:
+    have = {l["name"].lower(): l["id"] for l in svc.labels().list(userId="me").execute().get("labels", [])}
+    have.update({i.lower(): i for i in list(have.values())})  # system labels by id too (INBOX, UNREAD…)
+    ids = []
+    for n in names:
+        if n.lower() in have:
+            ids.append(have[n.lower()])
+        elif create:
+            ids.append(svc.labels().create(userId="me", body={"name": n}).execute()["id"])
+        else:
+            raise cc.CCError(cc.EX_USAGE, f"no label {n!r} (`gmail labels` lists them; --create makes it)")
+    return ids
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="gmail", add_help=False)
     ap.add_argument("-h", "--help", action="store_true")
@@ -60,6 +112,22 @@ def main() -> int:
     g.add_argument("id")
     g.add_argument("--html", action="store_true")
     sub.add_parser("labels", add_help=False)
+    for name in ("draft", "send"):
+        c = sub.add_parser(name, add_help=False)
+        c.add_argument("--to")
+        c.add_argument("--subject", default="")
+        c.add_argument("--body")
+        c.add_argument("--body-file")
+        c.add_argument("--cc")
+        c.add_argument("--bcc")
+        c.add_argument("--reply")
+        if name == "send":
+            c.add_argument("--draft")
+    lb = sub.add_parser("label", add_help=False)
+    lb.add_argument("ids", nargs="+")
+    lb.add_argument("--add", action="append", default=[])
+    lb.add_argument("--remove", action="append", default=[])
+    lb.add_argument("--create", action="store_true")
     try:
         a = ap.parse_args()
     except SystemExit:
@@ -72,6 +140,29 @@ def main() -> int:
     if a.cmd == "labels":
         for l in svc.labels().list(userId="me").execute().get("labels", []):
             print(f"- {l['name']} ({l['id']})")
+        return 0
+
+    if a.cmd == "send" and a.draft:
+        sent = svc.drafts().send(userId="me", body={"id": a.draft}).execute()
+        print(f"sent {sent['id']} (thread {sent['threadId']})")
+        return 0
+    if a.cmd in ("draft", "send"):
+        if not a.to:
+            raise cc.CCError(cc.EX_USAGE, "--to is required")
+        msg = compose(svc, a)
+        if a.cmd == "draft":
+            d = svc.drafts().create(userId="me", body={"message": msg}).execute()
+            print(f"draft {d['id']} (message {d['message']['id']}) — send it with: gmail send --draft {d['id']}")
+        else:
+            sent = svc.messages().send(userId="me", body=msg).execute()
+            print(f"sent {sent['id']} (thread {sent['threadId']})")
+        return 0
+    if a.cmd == "label":
+        if not a.add and not a.remove:
+            raise cc.CCError(cc.EX_USAGE, "give --add and/or --remove")
+        body = {"addLabelIds": label_ids(svc, a.add, a.create), "removeLabelIds": label_ids(svc, a.remove, False)}
+        svc.messages().batchModify(userId="me", body={"ids": a.ids, **body}).execute()
+        print(f"labelled {len(a.ids)} message(s): +{','.join(a.add) or '-'} -{','.join(a.remove) or '-'}")
         return 0
 
     if a.cmd == "search":
