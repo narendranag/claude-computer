@@ -70,6 +70,7 @@ EOF
   sed 's#--fg: \#111; }#--fg: \#111; background: url(https://example.com/x.png); }#' "$R/good" > "$R/url"
   sed 's#<header>#<header><img src="x.png">#' "$R/good" > "$R/img"
   sed 's#<h2>Tasks</h2>#<h2 onclick="x()">Tasks</h2>#' "$R/good" > "$R/onclick"
+  sed 's#--fg: \#111; }#--fg: \#111; } .dash-badge + .dash-time { grid-row: 2; }#' "$R/good" > "$R/neighbour"
   sed 's#<h2>Tasks</h2>#<h2 style="color:red">Tasks</h2>#' "$R/good" > "$R/style-attr"
   sed 's#<div data-slot="blockers"></div>##' "$R/good" > "$R/missing-slot"
   sed 's#<div data-slot="tasks"></div>#<div data-slot="tasks">fake rows</div>#' "$R/good" > "$R/filled-slot"
@@ -197,7 +198,7 @@ if [ "$(calls)" = 1 ]; then ok "designer called once in all"; else bad "designer
 
 case_new "rejected layouts: one retry, then a clear failure and no page"
 style
-for bad_reply in script url img onclick style-attr missing-slot filled-slot twice import font-face backslash link no-css prose; do
+for bad_reply in script url neighbour img onclick style-attr missing-slot filled-slot twice import font-face backslash link no-css prose; do
   rm -rf "$PROJ/.dashboard"
   : > "$LOG"
   STUB_REPLY=$bad_reply dash init "Rejected"
@@ -216,6 +217,8 @@ STUB_REPLY=missing-slot dash init "Rejected" --replace
 contains "$OUT" "required slot 'blockers' is missing"
 STUB_REPLY=url dash init "Rejected" --replace
 contains "$OUT" "CSS contains 'url('"
+STUB_REPLY=neighbour dash init "Rejected" --replace
+contains "$OUT" ".dash-badge + .dash-time never matches"
 
 case_new "a failed redesign keeps the last good page"
 style

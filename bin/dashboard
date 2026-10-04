@@ -343,6 +343,11 @@ def extract_blocks(reply: str) -> tuple[str, str, list[str]]:
     return (css[0] if len(css) == 1 else ""), (lay[0] if len(lay) == 1 else ""), errors
 
 
+# Pairs of item parts that can be next to each other, in this order (see fill()).
+ITEM_NEIGHBOURS = {("badge", "text"), ("text", "note"), ("note", "time"), ("text", "time"),
+                   ("text", "default"), ("default", "time")}
+
+
 def validate_css(css: str) -> list[str]:
     errors = []
     if len(css) > MAX_CSS:
@@ -356,6 +361,11 @@ def validate_css(css: str) -> list[str]:
         errors.append(f"CSS uses @{rule}, which is not allowed")
     if bare.count("{") != bare.count("}"):
         errors.append("CSS braces are unbalanced")
+    # `A + B` matches only when B is A's very next sibling. Inside an item the order is fixed (fill()):
+    # badge, text, note, time (tasks); badge, text, default, time (questions); text, note, time.
+    for a, b in re.findall(r"\.dash-(badge|text|note|time|default)\s*\+\s*[a-z]*\.dash-(badge|text|note|time|default)\b", low):
+        if (a, b) not in ITEM_NEIGHBOURS:
+            errors.append(f".dash-{a} + .dash-{b} never matches: in an item, .dash-{b} never directly follows .dash-{a}")
     return errors
 
 

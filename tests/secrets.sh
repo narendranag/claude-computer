@@ -29,7 +29,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 REPO="$PWD"
 
-for t in sops age-keygen jq git; do
+for t in sops age-keygen jq yq git; do
   command -v "$t" >/dev/null 2>&1 || { echo "tests/secrets.sh: needs $t" >&2; exit 3; }
 done
 
@@ -51,7 +51,7 @@ SYSBIN="$WORK/sysbin"
 mkdir -p "$SYSBIN"
 for t in sh bash env cat ls mkdir rmdir rm cp mv chmod touch mktemp date jq awk sed grep cut tr \
   head tail sort uniq wc stat find dirname basename id uname printf test true false expr paste \
-  fold sleep sops age-keygen git od; do
+  fold sleep sops age-keygen git od yq; do
   p="$(command -v "$t" 2>/dev/null)"
   case "$p" in /*) ln -sf "$p" "$SYSBIN/$t" ;; esac
 done
@@ -184,6 +184,28 @@ on alpha "$S" status
 check_exit 1 "$rc"
 contains "$OUT" "NOT encrypted"
 cp "$WORK/store.bak" "$STORE"
+
+# =========================================================================
+case_new "unset: one value, then the name once empty; asks or needs --yes"
+on alpha sh -c 'printf "fake-unset-a" | "$0" set gone.a --stdin && printf "fake-unset-b" | "$0" set gone.b --stdin' "$S"
+check_exit 0 "$rc"
+on alpha sh -c '"$0" unset gone.a < /dev/null' "$S"
+check_exit 2 "$rc"
+contains "$OUT" "no terminal to confirm on"
+on alpha "$S" unset gone.a --yes
+check_exit 0 "$rc"
+get alpha gone a
+check_exit 5 "$rc"
+get alpha gone b
+[ "$(cat "$OUT")" = "fake-unset-b" ] && ok "the other field is kept" || bad "gone.b: $(cat "$OUT")"
+git -C "$INST" log -1 --format=%s | grep -qx '\[alpha\] secrets: unset gone.a' && ok "commit [alpha] secrets: unset gone.a" || bad "commit subject"
+on alpha "$S" unset gone.b --yes
+check_exit 0 "$rc"
+grep -q '^gone:' "$STORE" && bad "empty name left in the store" || ok "empty name removed"
+on alpha "$S" unset gone.b --yes
+check_exit 5 "$rc"
+start=$(date +%s); bash -c '. "$0/lib/common.sh"; cc_timeout 1 sleep 5' "$REPO"; trc=$?; took=$(( $(date +%s) - start ))
+[ "$trc" -ne 0 ] && [ "$took" -lt 4 ] && ok "cc_timeout stops a slow command (${took}s)" || bad "cc_timeout: rc $trc after ${took}s"
 
 # =========================================================================
 case_new "check: names only"
