@@ -31,3 +31,5 @@ Secrets come from the fleet's sops store: `secrets exec --only NAME,… -- <cmd>
 ## Analytics and errors
 
 PostHog (key: `posthog.__NAME__` in the secrets store), unless this project is private/zero-cost, in which case Bugsink on the fleet.
+
+Marketing analytics: GA4 through Google Tag Manager, defined in `analytics.yaml` and applied with `analytics setup` / `analytics sync` (`~/claude-computer/docs/DEV-GUIDELINES.md`, "Analytics"). Set the real `domain` before the first `analytics setup`. Marketing events only (sign-up, lead, purchase); in-app behaviour goes to PostHog. Never `analytics publish` without asking.

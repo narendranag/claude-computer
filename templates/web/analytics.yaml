@@ -1,0 +1,27 @@
+# analytics.yaml — GA4 + Google Tag Manager for __NAME__. Source of truth: `analytics setup` and
+# `analytics sync` apply it and write the IDs below. Marketing events only; in-app behaviour goes to PostHog.
+# Guide: ~/claude-computer/docs/DEV-GUIDELINES.md, "Analytics".
+project: __NAME__
+domain: __NAME__.example.com # set the real domain before `analytics setup`
+ga: {}
+gtm: {}
+events:
+  # Push from the site when it happens: window.dataLayer.push({event: 'sign_up', method: 'email'})
+  - name: sign_up
+    key_event: true
+    params: [method]
+  - name: generate_lead
+    key_event: true
+custom_dimensions:
+  - parameter: method
+    name: Sign-up method
+funnels:
+  signup:
+    steps: [page_view, sign_up]
+reports:
+  acquisition:
+    dimensions: [sessionDefaultChannelGroup, sessionSource]
+    metrics: [sessions, totalUsers, keyEvents]
+  landing-pages:
+    dimensions: [landingPage]
+    metrics: [sessions, keyEvents]
