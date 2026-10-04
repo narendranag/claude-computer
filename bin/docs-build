@@ -1,0 +1,620 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6"]
+# ///
+"""docs-build — validate a project's docs/ and build what is generated from it.
+
+The standard (docs/DEV-GUIDELINES.md, "Documentation"): the Markdown files are the source of truth,
+each with YAML front matter; agents read llms.txt, AGENTS.md and data/*.json; people read one static
+index.html. This script checks the Markdown and writes everything generated:
+
+  1. refreshes included example blocks (<!-- include: path --> … <!-- /include -->)
+  2. validates front matter, links and #anchors (plus the project's own checks, see below)
+  3. writes data/manifest.json, data/glossary.json, llms.txt
+  4. writes index.html: every document in one offline page with search, contents and dark mode
+
+Usage:
+  docs-build [DIR]                  build DIR (default: ./docs, else the git root's docs/)
+  docs-build --check [DIR]          validate only; write nothing (for `just lint` and CI)
+  docs-build --init [DIR] --title T start DIR from templates/docs (refused if DIR has Markdown)
+  docs-build --vendor [DIR]         write DIR/build.py: a self-contained copy, for repos built
+                                    by people without ~/claude-computer (client repos)
+  docs-build --view DIR [--exclude GLOB …] [--out FILE] [--title T] [--open]
+                                    a read-only HTML view of every Markdown file under DIR, with
+                                    no front matter required (default out: DIR/.docs-view/index.html)
+
+Documents: README.md (id `index`, order 0) and NN-name.md. Required front matter: id, title, order,
+summary, status (design | provisional | stable), updated, audience, depends_on, related, answers.
+Glossary: the table under README.md's "Terms used throughout" heading (columns Term, Meaning).
+
+Project extension, optional: DIR/docs_ext.py may define
+  SITE = {"brand", "tagline", "banner", "note", "links": [[label, href]], "examples": [[label, href, what]]}
+  STATUSES = {…}                    replaces the allowed statuses
+  def validate(ctx): …              extra checks; call ctx.error("…")
+  def data(ctx): return {"name": {"label": …, "description": …, "data": obj}}   extra data/*.json
+ctx has: root, docs, error, load_yaml, tables_by_section, plain, slug, headings.
+
+Requires pandoc. Exit codes: 0 ok · 1 the docs have errors · 2 usage · 3 pandoc missing
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fnmatch
+import html
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import yaml
+
+ASSETS = None  # a vendored copy (--vendor) carries the page and stylesheet here
+HERE = Path(__file__).resolve()
+REQUIRED_KEYS = ["id", "title", "order", "summary", "status", "updated", "audience", "depends_on", "related", "answers"]
+DEFAULT_STATUSES = {"design", "provisional", "stable"}
+FENCE_LANG = {".yaml": "yaml", ".yml": "yaml", ".json": "json", ".cedar": "cedar", ".py": "python", ".ts": "ts", ".sh": "bash"}
+FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+INCLUDE = re.compile(r"(<!-- include: (\S+) -->\n)(.*?)(<!-- /include -->)", re.S)
+MD_LINK = re.compile(r"\]\(([^)\s]+)\)")
+EX_OK, EX_FAIL, EX_USAGE, EX_DEPS = 0, 1, 2, 3
+
+
+class Fail(Exception):
+    def __init__(self, code: int, msg: str):
+        super().__init__(msg)
+        self.code = code
+
+
+def asset(name: str) -> str:
+    if ASSETS is not None:
+        return ASSETS[name]
+    return (HERE.parent.parent / "lib" / "docs" / name).read_text(encoding="utf-8")
+
+
+def fill(template: str, values: dict[str, str]) -> str:
+    """Replace {{NAME}} placeholders in one pass, so filled-in text is never re-scanned."""
+    return re.sub(r"\{\{([A-Z_]+)\}\}", lambda m: values[m.group(1)], template)
+
+
+# ---------------------------------------------------------------- Markdown helpers
+
+
+def slug(heading: str) -> str:
+    s = re.sub(r"[`*_]", "", heading.strip().lower())
+    s = re.sub(r"[^\w\s-]", "", s)
+    return re.sub(r"\s+", "-", s)
+
+
+def headings(body: str) -> list[tuple[int, str]]:
+    body = re.sub(r"```.*?```", "", body, flags=re.S)
+    return [(len(m.group(1)), m.group(2).strip()) for m in re.finditer(r"^(#{1,6})\s+(.+)$", body, re.M)]
+
+
+def split_row(line: str) -> list[str]:
+    cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
+    return [c.strip().replace("\\|", "|") for c in cells]
+
+
+def tables_by_section(body: str):
+    """Yield (h2 heading, list of row dicts) for each Markdown table."""
+    section, lines, i = None, body.splitlines(), 0
+    while i < len(lines):
+        line = lines[i]
+        m = re.match(r"^##\s+(.+)$", line)
+        if m:
+            section = m.group(1).strip()
+        if line.startswith("|") and i + 1 < len(lines) and re.match(r"^\|[\s:|-]+\|$", lines[i + 1]):
+            header = [re.sub(r"\W+", "_", h.lower()).strip("_") for h in split_row(line)]
+            rows, i = [], i + 2
+            while i < len(lines) and lines[i].startswith("|"):
+                rows.append(dict(zip(header, split_row(lines[i]))))
+                i += 1
+            yield section, rows
+            continue
+        i += 1
+
+
+def plain(text: str) -> str:
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    return re.sub(r"[`*]", "", text)
+
+
+def pandoc(markdown: str, prefix: str) -> str:
+    base = ["pandoc", "-f", "gfm", "-t", "html", f"--id-prefix={prefix}-"]
+    run = None
+    for flag in ("--syntax-highlighting=none", "--no-highlight"):
+        run = subprocess.run(base + [flag], input=markdown, capture_output=True, text=True)
+        if run.returncode == 0:
+            return run.stdout
+    raise Fail(EX_FAIL, f"pandoc failed: {run.stderr.strip()}")
+
+
+# ---------------------------------------------------------------- the project
+
+
+class Project:
+    def __init__(self, root: Path):
+        self.root = root
+        self.errors: list[str] = []
+        self.ext = self._load_ext()
+        self.site = {"brand": None, "tagline": "Documentation", "banner": "", "note": "", "links": [], "examples": [],
+                     **getattr(self.ext, "SITE", {})}
+        self.statuses = set(getattr(self.ext, "STATUSES", DEFAULT_STATUSES))
+        self.docs: list[dict] = []
+
+    def _load_ext(self):
+        path = self.root / "docs_ext.py"
+        if not path.is_file():
+            return SimpleNamespace()
+        spec = importlib.util.spec_from_file_location("docs_ext", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def error(self, msg: str) -> None:
+        self.errors.append(msg)
+
+    def ctx(self):
+        return SimpleNamespace(root=self.root, docs=self.docs, error=self.error, load_yaml=self.load_yaml,
+                               tables_by_section=tables_by_section, plain=plain, slug=slug, headings=headings)
+
+    def load_yaml(self, rel: str):
+        path = self.root / rel
+        if not path.is_file():
+            self.error(f"file missing: {rel}")
+            return {}
+        try:
+            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            self.error(f"{rel}: invalid YAML: {exc}")
+            return {}
+
+    # -- loading
+
+    def doc_paths(self) -> list[Path]:
+        readme = self.root / "README.md"
+        return ([readme] if readme.is_file() else []) + sorted(self.root.glob("[0-9][0-9]-*.md"))
+
+    def refresh_includes(self, text: str) -> str:
+        def one(m):
+            target = self.root / m.group(2)
+            if not target.is_file():
+                self.error(f"include target missing: {m.group(2)}")
+                return m.group(0)
+            lang = FENCE_LANG.get(target.suffix, "")
+            return f"{m.group(1)}```{lang}\n{target.read_text(encoding='utf-8').rstrip()}\n```\n{m.group(4)}"
+
+        return INCLUDE.sub(one, text)
+
+    def load(self, write: bool) -> None:
+        if not (self.root / "README.md").is_file():
+            self.error("README.md is missing: it is the index (id: index, order: 0)")
+        for path in self.doc_paths():
+            text = path.read_text(encoding="utf-8")
+            fresh = self.refresh_includes(text)
+            if fresh != text:
+                if write:
+                    path.write_text(fresh, encoding="utf-8")
+                else:
+                    self.error(f"{path.name}: included examples are stale; run docs-build")
+                text = fresh
+            m = FRONT_MATTER.match(text)
+            if not m:
+                self.error(f"{path.name}: missing front matter")
+                continue
+            try:
+                meta = yaml.safe_load(m.group(1)) or {}
+            except yaml.YAMLError as exc:
+                self.error(f"{path.name}: front matter is not valid YAML: {exc}")
+                continue
+            meta["updated"] = str(meta.get("updated", ""))
+            self.docs.append({"file": path.name, "meta": meta, "body": text[m.end():]})
+        self.docs.sort(key=lambda d: d["meta"].get("order", 999))
+
+    # -- validation
+
+    def generated(self, extra: dict) -> set[str]:
+        return {"index.html", "llms.txt", "data/manifest.json", "data/glossary.json"} | {f"data/{n}.json" for n in extra}
+
+    def validate(self, extra_names) -> None:
+        docs = self.docs
+        ids = [d["meta"].get("id") for d in docs]
+        for d in docs:
+            meta, name = d["meta"], d["file"]
+            for key in REQUIRED_KEYS:
+                if key not in meta:
+                    self.error(f"{name}: front matter is missing '{key}'")
+            if meta.get("status") not in self.statuses:
+                self.error(f"{name}: status must be one of {sorted(self.statuses)}")
+            if name == "README.md" and meta.get("id") != "index":
+                self.error("README.md: id must be 'index'")
+            for key in ("depends_on", "related"):
+                for ref in meta.get(key) or []:
+                    if ref not in ids:
+                        self.error(f"{name}: {key} refers to unknown document id '{ref}'")
+        if len(set(ids)) != len(ids):
+            self.error("document ids are not unique")
+
+        generated = self.generated(extra_names)
+        slugs = {d["file"]: {slug(h) for _, h in headings(d["body"])} for d in docs}
+        for d in docs:
+            body = re.sub(r"```.*?```", "", d["body"], flags=re.S)
+            for target in MD_LINK.findall(body):
+                if re.match(r"^[a-z]+:", target):
+                    continue
+                path, _, frag = target.partition("#")
+                path = path or d["file"]
+                if path.rstrip("/") not in generated and not (self.root / path).exists():
+                    self.error(f"{d['file']}: broken link to '{target}'")
+                elif frag and path in slugs and frag not in slugs[path]:
+                    self.error(f"{d['file']}: no heading '#{frag}' in {path}")
+        if hasattr(self.ext, "validate"):
+            self.ext.validate(self.ctx())
+
+    # -- data
+
+    def build_data(self, extra: dict):
+        by_id = {d["meta"]["id"]: d for d in self.docs}
+        index = by_id["index"]
+        manifest = {
+            "title": index["meta"]["title"],
+            "summary": index["meta"]["summary"],
+            "source_of_truth": "markdown",
+            "documents": [
+                {**d["meta"], "file": d["file"],
+                 "sections": [{"level": lvl, "title": plain(h), "anchor": slug(h)} for lvl, h in headings(d["body"]) if lvl in (2, 3)]}
+                for d in self.docs
+            ],
+        }
+        if (self.root / "examples").is_dir():
+            manifest["examples"] = sorted(str(p.relative_to(self.root)) for p in (self.root / "examples").rglob("*") if p.is_file())
+        glossary = []
+        for section, rows in tables_by_section(index["body"]):
+            if section == "Terms used throughout":
+                glossary = [{"term": r.get("term", ""), "definition": r.get("meaning", "")} for r in rows]
+        return manifest, glossary
+
+    def llms_txt(self, extra: dict) -> str:
+        index = self.docs[0]["meta"]
+        note = (self.site["note"] + " " if self.site["note"] else "") + "The Markdown files are the source of truth."
+        out = [f"# {index['title']}", "", f"> {index['summary']}", "", note]
+        if (self.root / "AGENTS.md").is_file():
+            out.append("Read AGENTS.md first for conventions.")
+        out += ["", "## Documents", ""]
+        for d in self.docs[1:]:
+            m = d["meta"]
+            out.append(f"- [{m['order']:02d} {m['title']}]({d['file']}): {m['summary']}")
+        out += ["", "## Machine-readable data", "",
+                "- [Manifest](data/manifest.json): every document with its metadata, dependencies and section anchors",
+                "- [Glossary](data/glossary.json): terms and definitions"]
+        out += [f"- [{e['label']}](data/{n}.json): {e['description']}" for n, e in extra.items()]
+        if self.site["examples"]:
+            out += ["", "## Examples", ""] + [f"- [{label}]({href}): {what}" for label, href, what in self.site["examples"]]
+        out += ["", "## Optional", ""]
+        if (self.root / "AGENTS.md").is_file():
+            out.append("- [AGENTS.md](AGENTS.md): conventions for agents reading or editing these documents")
+        out += ["- [index.html](index.html): all documents as one static page for people", ""]
+        return "\n".join(out)
+
+    def machine_links(self, extra: dict) -> list[tuple[str, str]]:
+        links = [("llms.txt", "llms.txt")]
+        if (self.root / "AGENTS.md").is_file():
+            links.append(("AGENTS.md", "AGENTS.md"))
+        links += [("data/manifest.json", "data/manifest.json"), ("data/glossary.json", "data/glossary.json")]
+        links += [(f"data/{n}.json", f"data/{n}.json") for n in extra]
+        return links + [tuple(link) for link in self.site["links"]]
+
+    def build(self) -> str:
+        extra = self.ext.data(self.ctx()) if hasattr(self.ext, "data") else {}
+        manifest, glossary = self.build_data(extra)
+        (self.root / "data").mkdir(exist_ok=True)
+        files = {"manifest": manifest, "glossary": glossary, **{n: e["data"] for n, e in extra.items()}}
+        for name, obj in files.items():
+            (self.root / "data" / f"{name}.json").write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        (self.root / "llms.txt").write_text(self.llms_txt(extra), encoding="utf-8")
+        index = self.docs[0]["meta"]
+        page = render_site(
+            self.docs, title=index["title"], brand=self.site["brand"] or index["title"], tagline=self.site["tagline"],
+            banner=self.site["banner"], machine=self.machine_links(extra), generator="docs-build")
+        (self.root / "index.html").write_text(page, encoding="utf-8")
+        counts = ", ".join(f"{len(e['data'])} {n}" for n, e in extra.items() if isinstance(e["data"], list))
+        return f"built: index.html, llms.txt, data/ ({len(self.docs)} documents, {len(glossary)} terms{', ' + counts if counts else ''})"
+
+
+# ---------------------------------------------------------------- HTML
+
+
+def render_doc(doc: dict, file_to_id: dict[str, str], resolve=None) -> tuple[str, list]:
+    """Pandoc a document; point links at other documents to their sections in the same page."""
+    doc_id = doc["meta"]["id"]
+    out = pandoc(doc["body"], doc_id)
+
+    def href(m):
+        target = html.unescape(m.group(1))
+        if re.match(r"^[a-z]+:", target):
+            return f'href="{html.escape(target)}" target="_blank" rel="noopener"'
+        path, _, frag = target.partition("#")
+        if not path:
+            return f'href="#{doc_id}-{frag}"'
+        key = resolve(doc, path)[0] if resolve else path
+        if key in file_to_id:
+            other = file_to_id[key]
+            return f'href="#{other}-{frag}"' if frag else f'href="#{other}"'
+        if resolve:
+            return f'href="{html.escape(resolve(doc, path)[1] + ("#" + frag if frag else ""))}"'
+        return m.group(0)
+
+    out = re.sub(r'href="([^"]+)"', href, out)
+    out = out.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
+    toc = re.findall(r'<h2 id="([^"]+)">(.*?)</h2>', out, re.S)
+    return out, toc
+
+
+def render_site(docs, *, title, brand, tagline, banner, machine, generator, groups=None, resolve=None, source_href=None) -> str:
+    esc = html.escape
+    file_to_id = {d["file"]: d["meta"]["id"] for d in docs}
+    by_id = {d["meta"]["id"]: d for d in docs}
+
+    nav, last_group = [], None
+    for d in docs:
+        m = d["meta"]
+        if groups and groups.get(m["id"]) != last_group:
+            last_group = groups.get(m["id"])
+            nav.append(f'<p class="side-title">{esc(last_group)}</p>')
+        num = f'{m["order"]:02d}' if isinstance(m.get("order"), int) and m["order"] else "&nbsp;"
+        label = "Home" if m["id"] == "index" else esc(m["title"])
+        nav.append(f'<a href="#{m["id"]}" data-doc="{m["id"]}"><span class="num">{num}</span>{label}</a>')
+
+    sections = []
+    for i, d in enumerate(docs):
+        m = d["meta"]
+        body, toc = render_doc(d, file_to_id, resolve)
+        chips = [f'<span class="chip status-{m["status"]}">{m["status"]}</span>'] if m.get("status") else []
+        chips += [f'<span class="chip">{esc(a)}</span>' for a in m.get("audience") or []]
+        deps = ", ".join(f'<a href="#{r}">{esc(by_id[r]["meta"]["title"])}</a>' for r in m.get("depends_on") or [] if r in by_id)
+        src = source_href(d) if source_href else d["file"]
+        meta_line = (f'Updated {esc(m["updated"])} &middot; ' if m.get("updated") else "") + \
+            (f'Source <a href="{esc(src)}">{esc(d["file"])}</a>' if src else "")
+        if deps:
+            meta_line += f" &middot; Read first: {deps}"
+        toc_html = "".join(f'<a href="#{tid}">{re.sub(r"<[^>]+>", "", t)}</a>' for tid, t in toc)
+        prev_link = f'<a class="prev" href="#{docs[i-1]["meta"]["id"]}">&larr; {esc(docs[i-1]["meta"]["title"])}</a>' if i else "<span></span>"
+        next_link = f'<a class="next" href="#{docs[i+1]["meta"]["id"]}">{esc(docs[i+1]["meta"]["title"])} &rarr;</a>' if i + 1 < len(docs) else "<span></span>"
+        sections.append(f'''
+<section class="doc" id="{m["id"]}" data-title="{esc(m["title"])}">
+  <header class="doc-meta">
+    <div class="chips">{"".join(chips)}</div>
+    <p class="summary">{esc(m.get("summary") or "")}</p>
+    <p class="meta-line">{meta_line}</p>
+  </header>
+  <div class="doc-grid">
+    <article>{body}</article>
+    <nav class="toc" aria-label="On this page"><div class="toc-title">On this page</div>{toc_html}</nav>
+  </div>
+  <footer class="pager">{prev_link}{next_link}</footer>
+</section>''')
+
+    machine_html = ""
+    if machine:
+        machine_html = ('      <p class="side-title">Machine-readable</p>\n      <div class="machine">\n'
+                        + "".join(f'        <a href="{esc(h)}">{esc(label)}</a>\n' for label, h in machine) + "      </div>\n")
+    return fill(asset("page.html"), {
+        "TITLE": esc(title), "GENERATOR": generator, "STYLE": asset("style.css"), "BRAND": esc(brand),
+        "TAGLINE": esc(tagline), "BANNER": f'      <p class="banner">{esc(banner)}</p>\n' if banner else "",
+        "NAV": "\n".join(nav), "MACHINE": machine_html, "SECTIONS": "\n".join(sections),
+    })
+
+
+# ---------------------------------------------------------------- read-only view
+
+
+def git_date(root: Path, path: Path) -> str:
+    r = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%cs", "--", str(path)], capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip()
+    return dt.date.fromtimestamp(path.stat().st_mtime).isoformat()
+
+
+def first_paragraph(body: str) -> str:
+    for block in re.split(r"\n\s*\n", re.sub(r"```.*?```", "", body, flags=re.S)):
+        text = block.strip()
+        if text and not text.startswith(("#", "|", "<", "-", "*", ">", "!")) and not re.match(r"^\d+\.", text):
+            text = plain(" ".join(text.split()))
+            return text if len(text) <= 220 else text[:217].rsplit(" ", 1)[0] + "…"
+    return ""
+
+
+def build_view(root: Path, out: Path, excludes: list[str], title: str | None) -> str:
+    skip = {"node_modules", ".git"}
+    files = []
+    for p in sorted(root.rglob("*.md")):
+        rel = p.relative_to(root)
+        if any(part.startswith(".") or part in skip for part in rel.parts[:-1]):
+            continue
+        if any(fnmatch.fnmatch(str(rel), g) for g in excludes):
+            continue
+        files.append(rel)
+    # root files first, then folders in order; README first within each folder
+    files.sort(key=lambda r: (len(r.parts) > 1, str(r.parent), r.name.lower() != "readme.md", r.name.lower()))
+    out_dir = out.parent
+
+    docs, groups, used = [], {}, set()
+    for rel in files:
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        m = FRONT_MATTER.match(text)
+        meta, body = {}, text
+        if m:
+            try:
+                meta = yaml.safe_load(m.group(1)) or {}
+            except yaml.YAMLError:
+                meta = {}
+            body = text[m.end():]
+            meta = meta if isinstance(meta, dict) else {}
+        h1 = re.search(r"^#\s+(.+)$", body, re.M)
+        doc_id = re.sub(r"[^a-z0-9]+", "-", str(rel.with_suffix("")).lower()).strip("-") or "doc"
+        while doc_id in used or doc_id == "index":
+            doc_id += "-1"
+        used.add(doc_id)
+        docs.append({"file": str(rel), "body": body, "meta": {
+            "id": doc_id,
+            "title": str(meta.get("title") or (plain(h1.group(1)) if h1 else rel.stem)),
+            "summary": str(meta.get("summary") or meta.get("description") or first_paragraph(body)),
+            "status": meta.get("status") if meta.get("status") in DEFAULT_STATUSES else None,
+            "updated": git_date(root, root / rel),
+        }})
+        groups[doc_id] = str(rel.parent) + "/" if len(rel.parts) > 1 else "Top level"
+
+    name = title or root.name
+    stamp = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+    listing, last = [], None
+    for d in docs:
+        g = groups[d["meta"]["id"]]
+        if g != last:
+            listing.append(f"\n## {g}\n\n| Document | What it covers |\n|---|---|")
+            last = g
+        summary = d["meta"]["summary"].replace("|", "\\|")
+        listing.append(f"| [{d['meta']['title']}]({d['file']}) | {summary} |")
+    home = {"file": "", "body": f"# {name}\n\nEvery Markdown file under `{root.name}/`, read-only. "
+            f"Edit the files themselves; this page is regenerated from them.\n" + "\n".join(listing) + "\n",
+            "meta": {"id": "index", "title": name, "summary": f"{len(docs)} documents, generated {stamp}.", "updated": ""}}
+    groups["index"] = "Top level"
+
+    def resolve(doc, path):
+        base = (root / doc["file"]).parent if doc["file"] else root
+        target = (base / path).resolve()
+        try:
+            key = str(target.relative_to(root.resolve()))
+        except ValueError:
+            key = str(target)
+        return key, os.path.relpath(target, out_dir.resolve())
+
+    def source_href(d):
+        return os.path.relpath((root / d["file"]).resolve(), out_dir.resolve()) if d["file"] else ""
+
+    page = render_site([home] + docs, title=name, brand=name, tagline=f"Read-only view · {stamp}",
+                       banner="", machine=[], generator="docs-build --view", groups=groups, resolve=resolve,
+                       source_href=source_href)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(f".{out.name}.tmp")
+    tmp.write_text(page, encoding="utf-8")
+    os.replace(tmp, out)
+    return f"viewed: {out} ({len(docs)} documents)"
+
+
+# ---------------------------------------------------------------- init and vendor
+
+
+def init(root: Path, title: str) -> str:
+    template = HERE.parent.parent / "templates" / "docs"
+    if ASSETS is not None or not template.is_dir():
+        raise Fail(EX_USAGE, "--init needs the template's templates/docs (not available in a vendored copy)")
+    if root.exists() and any(root.glob("*.md")):
+        raise Fail(EX_USAGE, f"{root} already has Markdown files; --init only starts a new docs folder")
+    today = dt.date.today().isoformat()
+    for src in sorted(template.rglob("*")):
+        if src.is_file():
+            dest = root / src.relative_to(template)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            text = src.read_text(encoding="utf-8").replace("__DATE__", today)
+            m = FRONT_MATTER.match(text)
+            if m:  # inside the YAML, the title sits in double quotes: escape it as a JSON string
+                head = m.group(0).replace("__TITLE__", json.dumps(title)[1:-1])
+                text = head + text[m.end():]
+            dest.write_text(text.replace("__TITLE__", title), encoding="utf-8")
+    return f"started {root} from templates/docs"
+
+
+def vendor(root: Path) -> str:
+    src = HERE.read_text(encoding="utf-8")
+    assets = {"page.html": asset("page.html"), "style.css": asset("style.css")}
+    top = re.compile(r"^ASSETS = None\b.*$", re.M)  # the module-level line only; this one is indented
+    if not top.search(src):
+        raise Fail(EX_FAIL, "this copy is already vendored")
+    body = top.sub(lambda _: f"ASSETS = {assets!r}  # vendored: do not edit; re-run docs-build --vendor", src, count=1)
+    body = body.replace('"""docs-build — ', '"""build.py (vendored docs-build; refresh with `docs-build --vendor`) — ', 1)
+    dest = root / "build.py"
+    dest.write_text(body, encoding="utf-8")
+    dest.chmod(0o755)
+    return f"wrote {dest}: run it with `uv run {dest.name}` (or python3 with PyYAML), and pandoc"
+
+
+# ---------------------------------------------------------------- main
+
+
+def default_root() -> Path:
+    if ASSETS is not None:
+        return HERE.parent
+    if (Path.cwd() / "docs").is_dir():
+        return Path.cwd() / "docs"
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        return Path(r.stdout.strip()) / "docs"
+    return Path.cwd()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="docs-build", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("dir", nargs="?")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--init", action="store_true")
+    mode.add_argument("--vendor", action="store_true")
+    mode.add_argument("--view", action="store_true")
+    ap.add_argument("--title")
+    ap.add_argument("--exclude", action="append", default=[])
+    ap.add_argument("--out")
+    ap.add_argument("--open", action="store_true")
+    a = ap.parse_args()
+
+    root = Path(a.dir).expanduser().resolve() if a.dir else default_root()
+    if a.init:
+        if not a.title:
+            raise Fail(EX_USAGE, "--init needs --title")
+        print(init(root, a.title))
+        a.check = False
+    if a.vendor:
+        print(vendor(root))
+        return EX_OK
+    if not root.is_dir():
+        raise Fail(EX_USAGE, f"{root}: not a folder")
+    if not a.check and not shutil.which("pandoc"):
+        raise Fail(EX_DEPS, "pandoc is not on the PATH (brew install pandoc)")
+    if a.view:
+        out = Path(a.out).expanduser().resolve() if a.out else root / ".docs-view" / "index.html"
+        print(build_view(root, out, a.exclude, a.title))
+        if a.open:
+            subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", str(out)], check=False)
+        return EX_OK
+
+    project = Project(root)
+    project.load(write=not a.check)
+    extra_names = []
+    if hasattr(project.ext, "data") and not project.errors:
+        extra_names = list(project.ext.data(project.ctx()))
+    project.validate(extra_names)
+    if project.errors:
+        print("\n".join(f"ERROR {e}" for e in project.errors))
+        return EX_FAIL
+    if a.check:
+        print(f"ok: {len(project.docs)} documents are valid")
+        return EX_OK
+    print(project.build())
+    return EX_OK
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Fail as e:
+        print(f"docs-build: {e}", file=sys.stderr)
+        sys.exit(e.code)
+    except KeyboardInterrupt:
+        sys.exit(130)

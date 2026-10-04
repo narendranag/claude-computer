@@ -23,6 +23,7 @@ Python and TypeScript. Nothing else unless a platform forces it (Swift for a Mac
 - `CLAUDE.md` — what this project is, who it is for, how to run it, and a pointer to `~/claude-computer/docs/`
 - `TASKS.md` — `## Now / ## Next / ## Later / ## Done`
 - `README.md`, `.editorconfig`, `.gitignore`
+- `docs/` in the documentation standard below, started by `docs-build --init`
 - a `justfile` (or `Makefile`) with `setup`, `test`, `lint`, `run`
 - a pre-commit secret scan (`gitleaks`)
 
@@ -64,6 +65,19 @@ One Claude session per git worktree. Never two sessions in one working tree. `bi
 ## Headless browsing
 
 Playwright with its bundled Chromium — for e2e tests, scraping dynamic pages and screenshots. Never `chrome --headless`: Google Chrome is the human's browser (and Claude in Chrome's). From a terminal or a script, use `bin/browse`; in a web app, `@playwright/test`.
+
+## Documentation
+
+Every project documents itself the same way, so a person and an agent can both find what they need without reading everything.
+
+- **The Markdown is the source of truth**, in `docs/`: `README.md` (the index: reading order and a "Terms used throughout" table) and one `NN-name.md` per topic. Each file starts with YAML front matter: `id`, `title`, `order`, `summary`, `status` (`design`, `provisional`, `stable`), `updated`, `audience`, `depends_on`, `related`, `defines`, `answers`. `answers` lists the questions a document answers, so an agent can decide whether to open it.
+- **`docs/AGENTS.md`** states the conventions: one term means one thing; text in backticks is literal; headings are anchors; tables are data (one fact per cell); diagrams are plain text; example code is included from real files (`<!-- include: path -->`), never retyped.
+- **`docs-build` generates the rest**, and the generated files are committed so a reader needs no tools: `llms.txt` and `data/manifest.json` and `data/glossary.json` for agents, and `index.html` for people — every document in one offline page with search, contents, dark mode and print styles. It validates as it builds: front matter, `depends_on`/`related`, every link and `#anchor`, stale includes. `docs-build --check` is part of `just lint`.
+- **Project-specific checks and data** go in `docs/docs_ext.py` (`SITE`, `validate(ctx)`, `data(ctx)`; see `docs-build --help`) — for example, validating example config files against each other, or extracting a catalogue table into JSON.
+- **Client repos** carry a vendored copy (`docs-build --vendor docs` writes `docs/build.py`), because the people who build them don't have `~/claude-computer`.
+- **Start one** with `docs-build --init docs --title "<project>"`; `new-app` and `new-client` do it for you.
+
+`claude-computer` itself keeps its operational formats (machine files, `FLEET.md`, `DECISIONS.md`); `docs-build --view` renders any Markdown tree, front matter or not, into the same kind of page for reading. The session-start hook keeps one for this repo at `~/claude-computer/.docs-view/index.html`.
 
 ## Documents as build output
 

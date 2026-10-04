@@ -108,6 +108,18 @@ while IFS= read -r f; do
 done < <(grep -lI '__NAME__' "$dir/CLAUDE.md" "$dir/TASKS.md" 2>/dev/null || true)
 [ "$fail" -eq 0 ] || cc_die "$EX_FAIL" "could not substitute the client name in $dir"
 
+# Client docs follow the standard too, with a vendored build.py: people who build this repo
+# don't have ~/claude-computer.
+step "docs/ from templates/docs, with a vendored build.py"
+if [ -e "$dir/docs" ]; then
+  cc_info "  docs/ already exists; left as it is"
+elif command -v uv >/dev/null && command -v pandoc >/dev/null; then
+  { "$CC_ROOT/bin/docs-build" --init "$dir/docs" --title "$name" && "$CC_ROOT/bin/docs-build" --vendor "$dir/docs"; } >/dev/null \
+    || cc_die "$EX_FAIL" "docs-build could not start $dir/docs"
+else
+  cc_info "  skipped: docs-build needs uv and pandoc; later, run: docs-build --init docs --title $name && docs-build --vendor docs"
+fi
+
 step "git init + secret-scan hook + first commit"
 cd "$dir"
 git init -q -b main

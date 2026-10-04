@@ -111,6 +111,10 @@ jobs:
       - name: rm-guard hook
         run: ./tests/rm-guard.sh
 
+      # docs-build renders with pandoc (uv is set up above).
+      - name: docs-build matrix
+        run: sudo apt-get install -y -qq pandoc && ./tests/docs-build.sh
+
       # setup-tools.sh --only vscode and --only agent-reach; `code`, `uv` and `npm` are stubs,
       # so nothing is ever installed.
       - name: setup-tools.sh dry-run and failure matrix

@@ -8,6 +8,7 @@ test:
 
 lint:
     uv run ruff check . && uv run ruff format --check . && uv run pyright
+    docs-build --check docs
 
 run *args:
     uv run __NAME__ {{args}}

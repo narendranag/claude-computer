@@ -29,4 +29,10 @@ if [ -d "$HOME/vault" ]; then
   [ -f "$HOME/Library/Application Support/MacParakeet/macparakeet.db" ] && to 30 "$ROOT/bin/transcripts-sync" 2>&1 | head -1
   to 30 "$ROOT/bin/tasks-sync" 2>&1 | head -1
 fi
+
+# This brain's docs as one reading page (docs-build --view), rebuilt in the background so it never delays the session.
+if [ -x "$ROOT/bin/docs-build" ] && command -v pandoc >/dev/null && command -v uv >/dev/null; then
+  ( to 120 "$ROOT/bin/docs-build" --view "$ROOT" --title claude-computer --exclude 'templates/**' \
+      --exclude CODE_OF_CONDUCT.md --exclude CONTRIBUTING.md --exclude SECURITY.md > /dev/null 2>&1 & )
+fi
 exit 0
