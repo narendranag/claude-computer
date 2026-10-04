@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- **Progress dashboards for long tasks.** `bin/dashboard` keeps a live page at `.dashboard/index.html` in the project: tasks (pending, in progress, done, blocked, cancelled), questions waiting for you with each proposed default and whether it was applied, the latest deliverables with links, current blockers, the last real update and a separate live clock. One self-contained file — it opens with a double-click, works offline and reloads every 10 seconds; `dashboard snapshot` makes a copy labelled as one, for attaching. Subcommands: `style`, `init`, `task`, `question`, `deliverable`, `blocker`, `remove`, `open`, `render`, `redesign`, `snapshot`, `show`, `path`. It writes only to `.dashboard/` and `~/.config/claude-dashboard/style.json`.
+- **A dashboard designer** (`claude-global/agents/dashboard-designer.md`, Sonnet at medium effort) designs the layout once per task. `bin/dashboard` runs it headless with no tools, no MCP, no settings or hooks, no CLAUDE.md or memory, from an empty folder; it sees only the task's facts, the saved style and design guidance (the `frontend-design` skill's, if installed). Its CSS and HTML are validated before use — no scripts, no outside resources, only known markup, every data slot exactly once — and a rejected or failed design keeps the last good page and says exactly what failed. `lib/dashboard/page.html` is the trusted skeleton: the clock script, a Content-Security-Policy that allows only that script by hash, and the 10-second reload. `tests/dashboard.sh` (in CI, with a stub designer) covers validation, unchanged timestamps, the last good page on failure, the designer's flags and folder, and that writes stay inside `.dashboard/`.
+- **Three rules in `claude-global/CLAUDE.md`:** long tasks (more than five steps or over 30 minutes) get a dashboard first, opened and checked, and updated after every step; questions go on the dashboard with a proposed default while work continues, and a default is applied only when safe, reversible and within Claude's authority — never for publishing, spending, deleting, credentials, strategy or policy; a status question is not a stop.
+
+### Changed
+
+- `dotfiles/gitignore_global` ignores `.dashboard/`. `claude-global/settings.json` allows `dashboard`.
+
 ## [0.5.0] — 2026-10-04
 
 Bitwarden leaves; machine secrets move into one sops + age file in your private instance, read by the wrappers and never by Claude. A plaintext dotenv file moves in with one command, and projects get their secrets through `secrets exec`. And the terminal changes: every Ghostty window opens into one herdr session that tracks each agent — working, blocked, done or idle — under a powerlevel10k-style prompt.
