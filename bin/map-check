@@ -21,7 +21,9 @@ Compares, for this host:
 then runs bin/security-check.
 
 "missing" = recorded but not present. "unrecorded" = present but not in the map.
-Map bullets may be globs (`com.google.*`) to accept a vendor's helpers in one line.
+Map bullets may be globs (`com.google.*`) to accept a vendor's helpers in one line. A port bullet
+`<process>:*` accepts any port that process listens on. Bullets under "## Brew skipped" are Brewfile
+entries deliberately not installed on this host, so they are not "missing".
 Either is drift: fix the machine or fix the map, in the same session.
 
 Usage:
@@ -96,6 +98,13 @@ def checked_section(text: str, heading: str) -> set[str]:
     return items
 
 
+def plain_section(text: str, heading: str) -> set[str]:
+    """First backticked token of each bullet under '## <heading>' (a section map-check reads but doesn't diff)."""
+    m = re.search(rf"^## {re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.S | re.M)
+    return {b.group(1).strip() for line in (m.group(1).splitlines() if m else [])
+            if (b := re.match(r"^\s*-\s+`([^`]+)`", line))}
+
+
 def unmatched(have: set[str], patterns: set[str]) -> set[str]:
     """Items in `have` matched by no pattern. Map entries may be globs, e.g. `com.google.*`."""
     return {h for h in have if not any(fnmatch.fnmatchcase(h, p) for p in patterns)}
@@ -132,6 +141,7 @@ def check_brew(fm: dict, text: str) -> list[str]:
     layers = layers if isinstance(layers, list) else [layers]
     expected, problems = brew_expected(layers)
     expected |= {short(x) for x in checked_section(text, "Brew")}
+    expected -= {short(x) for x in plain_section(text, "Brew skipped")}  # layer entries deliberately not installed
     casks = {short(x) for x in run(["brew", "list", "--cask", "-1"]).split()}
     # "missing" checks against everything installed (a recorded formula may also be a dependency);
     # "unrecorded" checks only what was installed on request, so dependencies don't count as drift.
@@ -195,6 +205,11 @@ def listening_ports() -> dict[str, str]:
 def check_ports(text: str) -> list[str]:
     present = listening_ports()
     expected = checked_section(text, "Listening ports")
+    # `<process>:*` accepts any port that process listens on (macOS's rapportd picks new ones every boot);
+    # it is never "missing", since such a process may not be listening at all.
+    anyport = {e[:-2] for e in expected if e.endswith(":*")}
+    expected -= {f"{n}:*" for n in anyport}
+    present = {p: n for p, n in present.items() if n not in anyport}
     out = [f"missing: {p}" for p in sorted(expected - present.keys(), key=lambda x: int(x) if x.isdigit() else 0)]
     out += [f"unrecorded: {p} ({present[p]})" for p in sorted(present.keys() - expected, key=lambda x: int(x) if x.isdigit() else 0)]
     return out
