@@ -113,19 +113,19 @@ write_replies
 case_new "no saved style → exit 5, nothing written"
 dash init "A task"
 check_exit 5 $?
-contains "$OUT" "light or dark"
+contains "$OUT" "light, dark, or auto"
 absent "$PROJ/.dashboard"
 if [ "$(calls)" = 0 ]; then ok "designer not called"; else bad "designer called without a style"; fi
 
 case_new "style: validation and saving"
-dash style --theme auto --accent '#000000'
-check_exit 0 $?
-contains "$CASE/xdg/claude-dashboard/style.json" '"theme": "auto"'
 dash style --theme dark --accent 'blue'
 check_exit 2 $?
 contains "$OUT" "hex colour"
 dash style --theme dark
 check_exit 2 $?
+dash style --theme auto --accent '#000000'
+check_exit 0 $?
+contains "$CASE/xdg/claude-dashboard/style.json" '"theme": "auto"'
 dash style --theme dark --density dense --accent '#2a6df4'
 check_exit 0 $?
 exists "$CASE/xdg/claude-dashboard/style.json"
