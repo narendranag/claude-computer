@@ -1,0 +1,6 @@
+# Defaults for bin/analytics. Copy to analytics.defaults.yaml (the file the script reads) and fill in
+# your own IDs; `analytics accounts` lists them. The real file is optional and instances commit it.
+ga_account: accounts/0000000000   # analytics accounts lists yours
+gtm_account: accounts/0000000000  # analytics accounts lists yours
+time_zone: Etc/UTC
+currency: USD

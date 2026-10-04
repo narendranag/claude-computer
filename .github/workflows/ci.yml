@@ -107,6 +107,10 @@ jobs:
       - name: dashboard matrix
         run: ./tests/dashboard.sh
 
+      # bin/analytics, offline: plans only, no Google call.
+      - name: analytics matrix
+        run: ./tests/analytics.sh
+
       # The rm-guard hook: rm without a prompt only inside temporary folders; every other rm asks.
       - name: rm-guard hook
         run: ./tests/rm-guard.sh

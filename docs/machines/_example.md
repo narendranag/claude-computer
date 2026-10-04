@@ -41,11 +41,18 @@ User agents in `~/Library/LaunchAgents` and daemons this machine owns, by label.
 - `local.claude-computer.*` — tasks-sync, transcripts-sync (watches the MacParakeet database), feeds-sync …
 - `com.google.*` — Chrome updaters (a glob covers a vendor's helpers)
 
+## Brew skipped
+
+Brewfile entries deliberately not installed on this machine, so they are not reported as missing. Not otherwise checked.
+
+- `some-formula`
+
 ## Listening ports (checked)
 
 `<port>` — `<process>` — why. Loopback-only listeners can be omitted.
 
 - `8000` — `uvicorn` — example-app's API, reached over the tailnet
+- `rapportd:*` — rapportd — Continuity; ports change every boot (`<process>:*` accepts any port that process listens on)
 
 ## Services
 

@@ -78,7 +78,9 @@ install_job() {
              timing="<key>WatchPaths</key><array><string>${sched#watch:}</string></array><key>ThrottleInterval</key><integer>30</integer>" ;;
   esac
   mkdir -p "$AGENTS" "$LOGS"
-  cmd="${cmd//&/&amp;}"; cmd="${cmd//</&lt;}"; cmd="${cmd//>/&gt;}"
+  # XML-escape with sed, not ${cmd//</&lt;}: since bash 5.2 (patsub_replacement) a bare & in that
+  # replacement means "the matched text", turning < into <lt;, and quoting it breaks bash 3.2.
+  cmd="$(printf '%s' "$cmd" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')"
   cat > "$plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

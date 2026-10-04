@@ -1,0 +1,510 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["google-api-python-client>=2.150", "google-auth-oauthlib>=1.2", "requests>=2.31", "ruamel.yaml>=0.18"]
+# ///
+"""analytics — GA4 and Google Tag Manager for a project, kept in the project's analytics.yaml.
+
+GA4 measures acquisition and marketing: traffic, campaigns, conversions. In-app product behaviour goes
+to PostHog (docs/DEV-GUIDELINES.md, "Analytics"). So analytics.yaml lists marketing events only.
+
+analytics.yaml (project root) is the source of truth; `setup` and `sync` apply it and write the IDs back:
+
+  project: Wet Wicket              # GA property and GTM container names
+  domain: example.com
+  ga: {account, property, stream, measurement_id}      # account defaults from the fleet; rest written by setup
+  gtm: {account, container, public_id, workspace}      # same
+  events:                          # each fires from dataLayer.push({event: '<name>', <param>: …})
+    - name: sign_up
+      key_event: true              # a GA "key event" (conversion)
+      params: [method]
+  custom_dimensions:               # event parameters you want to report on
+    - {parameter: method, name: Sign-up method}
+  funnels:
+    signup: {steps: [page_view, sign_up], open: false}
+  reports:
+    acquisition: {dimensions: [sessionDefaultChannelGroup], metrics: [sessions, totalUsers, keyEvents]}
+
+Usage:
+  analytics accounts                          GA accounts and properties, GTM accounts and containers
+  analytics init [DIR] --project NAME --domain D
+                                              write a starter analytics.yaml (no network)
+  analytics setup [DIR] [--dry-run]           GA4 property + web stream; GTM container + the Google tag
+                                              on all pages. Reuses a property or container of the same
+                                              name. Writes the IDs into analytics.yaml
+  analytics sync [DIR] [--dry-run]            GA: custom dimensions, key events. GTM: a data-layer
+                                              variable per parameter, a trigger and a GA4 event tag per
+                                              event; then a container version — NOT published
+  analytics publish [DIR] [--version ID]      publish the latest (or given) container version: changes
+                                              the live site, so ask the owner first
+  analytics funnel [DIR] NAME [--days N]      run a funnel from analytics.yaml (Data API, v1alpha)
+  analytics report [DIR] NAME [--days N]      run a report from analytics.yaml (Data API)
+  analytics snippet [DIR]                     the GTM snippets (and the Next.js one-liner) for the site
+
+DIR defaults to the current folder. --dry-run reads but writes nothing and prints the plan.
+Defaults (GA account, GTM account, time zone, currency) come from $CC_ROOT/analytics.defaults.yaml.
+ANALYTICS_OFFLINE=1 plans without any network call (tests).
+Exit codes: 0 ok · 1 API error · 2 usage · 5 no analytics.yaml or no Google credentials
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import os
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import cc  # noqa: E402
+
+from ruamel.yaml import YAML  # noqa: E402
+
+ALL_PAGES = "2147479553"  # GTM's built-in "All Pages" trigger
+EVENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+OFFLINE = os.environ.get("ANALYTICS_OFFLINE") == "1"
+yaml = YAML()
+yaml.preserve_quotes = True
+yaml.indent(mapping=2, sequence=4, offset=2)
+
+
+def die(code: int, msg: str):
+    raise cc.CCError(code, msg)
+
+
+# ---------------------------------------------------------------- spec
+
+
+def spec_path(d: str | None) -> Path:
+    return (Path(d).expanduser() if d else Path.cwd()).resolve() / "analytics.yaml"
+
+
+def load(d: str | None) -> tuple[Path, dict]:
+    p = spec_path(d)
+    if not p.is_file():
+        die(cc.EX_CONFIG, f"no {p}: start one with `analytics init {p.parent} --project NAME --domain example.com`")
+    spec = yaml.load(p.read_text()) or {}
+    for k in ("project", "domain"):
+        if not spec.get(k):
+            die(cc.EX_USAGE, f"{p}: `{k}` is required")
+    spec.setdefault("ga", {})
+    spec.setdefault("gtm", {})
+    defaults = load_defaults()
+    spec["ga"].setdefault("account", defaults.get("ga_account"))
+    spec["gtm"].setdefault("account", defaults.get("gtm_account"))
+    validate(p, spec)
+    return p, spec
+
+
+def load_defaults() -> dict:
+    f = cc.ROOT / "analytics.defaults.yaml"
+    return dict(yaml.load(f.read_text()) or {}) if f.is_file() else {}
+
+
+def validate(p: Path, spec: dict) -> None:
+    errors = []
+    names = [e.get("name") for e in spec.get("events") or []]
+    for n in names:
+        if not n or not EVENT_NAME.match(str(n)):
+            errors.append(f"event name {n!r}: snake_case, starting with a letter, at most 40 characters")
+    if len(set(names)) != len(names):
+        errors.append("event names repeat")
+    known = set(names) | {"page_view", "session_start", "first_visit", "user_engagement", "scroll", "click"}
+    for fname, f in (spec.get("funnels") or {}).items():
+        steps = f.get("steps") or []
+        if len(steps) < 2:
+            errors.append(f"funnel {fname}: needs at least two steps")
+        errors += [f"funnel {fname}: step {s!r} is not an event in this file" for s in steps if s not in known]
+    for rname, r in (spec.get("reports") or {}).items():
+        if not r.get("metrics"):
+            errors.append(f"report {rname}: needs metrics")
+    params = {p for e in spec.get("events") or [] for p in e.get("params") or []}
+    for cd in spec.get("custom_dimensions") or []:
+        if cd.get("parameter") not in params:
+            errors.append(f"custom dimension {cd.get('parameter')!r} is not a parameter of any event")
+    if errors:
+        die(cc.EX_USAGE, f"{p}:\n  - " + "\n  - ".join(errors))
+
+
+def save(p: Path, spec: dict) -> None:
+    tmp = p.with_name(f".{p.name}.tmp")
+    with tmp.open("w") as fh:
+        yaml.dump(spec, fh)
+    tmp.replace(p)
+
+
+# ---------------------------------------------------------------- Google
+
+
+def svc(name: str, version: str):
+    import google_auth
+    return google_auth.service(name, version)
+
+
+class Plan:
+    """Collects what would change; executes when not a dry run."""
+
+    def __init__(self, dry: bool):
+        self.dry = dry
+        self.lines: list[str] = []
+
+    def step(self, what: str, fn=None):
+        self.lines.append(("would " if self.dry else "") + what)
+        print(("  would " if self.dry else "  ") + what)
+        return None if self.dry or fn is None else fn()
+
+
+def find(items, key: str, value: str):
+    return next((i for i in items or [] if i.get(key) == value), None)
+
+
+# ---------------------------------------------------------------- commands
+
+
+def cmd_accounts(a) -> int:
+    ga = svc("analyticsadmin", "v1beta")
+    for acc in ga.accountSummaries().list(pageSize=200).execute().get("accountSummaries", []):
+        print(f"GA  {acc['account']}  {acc.get('displayName')}")
+        for p in acc.get("propertySummaries", []):
+            print(f"      {p['property']}  {p.get('displayName')}")
+    tm = svc("tagmanager", "v2")
+    for acc in tm.accounts().list().execute().get("account", []):
+        print(f"GTM {acc['path']}  {acc.get('name')}")
+        for c in tm.accounts().containers().list(parent=acc["path"]).execute().get("container", []):
+            print(f"      {c['path']}  {c['name']} ({c.get('publicId')})")
+    return 0
+
+
+def cmd_init(a) -> int:
+    p = spec_path(a.dir)
+    if p.exists():
+        die(cc.EX_USAGE, f"{p} already exists")
+    if not a.project or not a.domain:
+        die(cc.EX_USAGE, "--project and --domain are required")
+    p.write_text(f"""# analytics.yaml — GA4 + Google Tag Manager for {a.project}. Source of truth; `analytics setup` and
+# `analytics sync` apply it and write the IDs below. Marketing events only: in-app behaviour goes to PostHog.
+# Guide: ~/claude-computer/docs/DEV-GUIDELINES.md, "Analytics".
+project: {a.project}
+domain: {a.domain}
+ga: {{}}
+gtm: {{}}
+events:
+  # Push from the site: window.dataLayer.push({{event: 'sign_up', method: 'email'}})
+  - name: sign_up
+    key_event: true
+    params: [method]
+  - name: generate_lead
+    key_event: true
+custom_dimensions:
+  - parameter: method
+    name: Sign-up method
+funnels:
+  signup:
+    steps: [page_view, sign_up]
+reports:
+  acquisition:
+    dimensions: [sessionDefaultChannelGroup, sessionSource]
+    metrics: [sessions, totalUsers, keyEvents]
+  landing-pages:
+    dimensions: [landingPage]
+    metrics: [sessions, keyEvents]
+""")
+    print(f"wrote {p} — edit the events, then `analytics setup` and `analytics sync`")
+    return 0
+
+
+def cmd_setup(a) -> int:
+    p, spec = load(a.dir)
+    plan = Plan(a.dry_run)
+    name, domain = str(spec["project"]), str(spec["domain"])
+    ga, gtm = spec["ga"], spec["gtm"]
+    if not ga.get("account") or not gtm.get("account"):
+        die(cc.EX_USAGE, "no GA or GTM account: set ga.account / gtm.account, or ga_account / gtm_account in "
+                         f"{cc.ROOT / 'analytics.defaults.yaml'} (`analytics accounts` lists them)")
+    d = load_defaults()
+    print(f"{name} ({domain})")
+
+    # GA4: property, then a web stream for the domain
+    stream = None
+    if OFFLINE:
+        prop = None
+    else:
+        admin = svc("analyticsadmin", "v1beta")
+        props = admin.properties().list(filter=f"parent:{ga['account']}", pageSize=200).execute().get("properties", [])
+        prop = find(props, "displayName", name)
+    if prop:
+        print(f"  GA property exists: {prop['name']}")
+    else:
+        body = {"parent": ga["account"], "displayName": name, "timeZone": d.get("time_zone", "Etc/UTC"),
+                "currencyCode": d.get("currency", "USD")}
+        prop = plan.step(f"create GA property {name!r} in {ga['account']}",
+                         lambda: admin.properties().create(body=body).execute())
+    if prop:
+        ga["property"] = prop["name"]
+        streams = admin.properties().dataStreams().list(parent=prop["name"]).execute().get("dataStreams", [])
+        stream = next((s for s in streams if s.get("type") == "WEB_DATA_STREAM"
+                       and domain in s.get("webStreamData", {}).get("defaultUri", "")), None)
+    if stream:
+        print(f"  GA web stream exists: {stream['webStreamData']['measurementId']}")
+    else:
+        body = {"type": "WEB_DATA_STREAM", "displayName": domain, "webStreamData": {"defaultUri": f"https://{domain}"}}
+        stream = plan.step(f"create web stream https://{domain}",
+                           lambda: admin.properties().dataStreams().create(parent=prop["name"], body=body).execute())
+    if stream:
+        ga["stream"] = stream["name"]
+        ga["measurement_id"] = stream["webStreamData"]["measurementId"]
+
+    # GTM: container, its default workspace, the Google tag on all pages
+    if OFFLINE:
+        cont = None
+    else:
+        tm = svc("tagmanager", "v2")
+        conts = tm.accounts().containers().list(parent=gtm["account"]).execute().get("container", [])
+        cont = find(conts, "name", name)
+    if cont:
+        print(f"  GTM container exists: {cont['publicId']}")
+    else:
+        cont = plan.step(f"create GTM web container {name!r} in {gtm['account']}",
+                         lambda: tm.accounts().containers().create(
+                             parent=gtm["account"], body={"name": name, "usageContext": ["web"]}).execute())
+    if cont:
+        gtm["container"], gtm["public_id"] = cont["path"], cont["publicId"]
+        ws = tm.accounts().containers().workspaces().list(parent=cont["path"]).execute()["workspace"][0]
+        gtm["workspace"] = ws["path"]
+        tags = tm.accounts().containers().workspaces().tags().list(parent=ws["path"]).execute().get("tag", [])
+        mid = ga.get("measurement_id")
+        if find(tags, "name", "Google tag"):
+            print("  GTM Google tag exists")
+        elif mid:
+            body = {"name": "Google tag", "type": "googtag", "firingTriggerId": [ALL_PAGES],
+                    "parameter": [{"type": "template", "key": "tagId", "value": mid}]}
+            plan.step(f"add the Google tag ({mid}) on all pages",
+                      lambda: tm.accounts().containers().workspaces().tags().create(parent=ws["path"], body=body).execute())
+    else:
+        plan.step("add the Google tag on all pages (after the container exists)")
+
+    if not a.dry_run and not OFFLINE:
+        save(p, spec)
+        print(f"wrote the IDs to {p}\nnext: `analytics sync` (events), then the site snippet: `analytics snippet`")
+    return 0
+
+
+def cmd_sync(a) -> int:
+    p, spec = load(a.dir)
+    ga, gtm = spec["ga"], spec["gtm"]
+    if not OFFLINE and not (ga.get("property") and gtm.get("workspace") and ga.get("measurement_id")):
+        die(cc.EX_USAGE, f"{p}: run `analytics setup` first")
+    plan = Plan(a.dry_run)
+    events = list(spec.get("events") or [])
+    print(f"{spec['project']}: {len(events)} event(s)")
+
+    # GA: custom dimensions, key events
+    if OFFLINE:
+        dims, keys = [], []
+    else:
+        admin = svc("analyticsadmin", "v1beta").properties()
+        dims = admin.customDimensions().list(parent=ga["property"]).execute().get("customDimensions", [])
+        keys = admin.keyEvents().list(parent=ga["property"]).execute().get("keyEvents", [])
+    for cd in spec.get("custom_dimensions") or []:
+        if not find(dims, "parameterName", cd["parameter"]):
+            body = {"parameterName": cd["parameter"], "displayName": cd.get("name") or cd["parameter"], "scope": "EVENT"}
+            plan.step(f"GA custom dimension {cd['parameter']!r}",
+                      lambda b=body: admin.customDimensions().create(parent=ga["property"], body=b).execute())
+    for e in events:
+        if e.get("key_event") and not find(keys, "eventName", e["name"]):
+            plan.step(f"GA key event {e['name']!r}",
+                      lambda n=e["name"]: admin.keyEvents().create(
+                          parent=ga["property"], body={"eventName": n, "countingMethod": "ONCE_PER_EVENT"}).execute())
+
+    # GTM: data-layer variables, custom-event triggers, GA4 event tags
+    ws_path = gtm.get("workspace", "")
+    if OFFLINE:
+        variables, triggers, tags = [], [], []
+    else:
+        ws = svc("tagmanager", "v2").accounts().containers().workspaces()
+        variables = ws.variables().list(parent=ws_path).execute().get("variable", [])
+        triggers = ws.triggers().list(parent=ws_path).execute().get("trigger", [])
+        tags = ws.tags().list(parent=ws_path).execute().get("tag", [])
+    changed = False
+    for param in sorted({p for e in events for p in e.get("params") or []}):
+        vname = f"dlv - {param}"
+        if not find(variables, "name", vname):
+            body = {"name": vname, "type": "v", "parameter": [
+                {"type": "integer", "key": "dataLayerVersion", "value": "2"},
+                {"type": "template", "key": "name", "value": param}]}
+            plan.step(f"GTM data-layer variable {param!r}", lambda b=body: ws.variables().create(parent=ws_path, body=b).execute())
+            changed = True
+    for e in events:
+        n, tname = e["name"], f"event - {e['name']}"
+        trig = find(triggers, "name", tname)
+        if not trig:
+            body = {"name": tname, "type": "customEvent", "customEventFilter": [{"type": "equals", "parameter": [
+                {"type": "template", "key": "arg0", "value": "{{_event}}"},
+                {"type": "template", "key": "arg1", "value": n}]}]}
+            trig = plan.step(f"GTM trigger on dataLayer event {n!r}",
+                             lambda b=body: ws.triggers().create(parent=ws_path, body=b).execute())
+            changed = True
+        if not find(tags, "name", f"GA4 - {n}"):
+            params = [{"type": "map", "map": [{"type": "template", "key": "parameter", "value": p},
+                                              {"type": "template", "key": "parameterValue", "value": f"{{{{dlv - {p}}}}}"}]}
+                      for p in e.get("params") or []]
+            body = {"name": f"GA4 - {n}", "type": "gaawe",
+                    "firingTriggerId": [trig["triggerId"]] if trig else [],
+                    "parameter": [{"type": "template", "key": "eventName", "value": n},
+                                  {"type": "template", "key": "measurementIdOverride", "value": ga.get("measurement_id", "")},
+                                  {"type": "list", "key": "eventSettingsTable", "list": params}]}
+            plan.step(f"GTM GA4 event tag for {n!r}" + (f" with {', '.join(e.get('params') or [])}" if e.get("params") else ""),
+                      lambda b=body: ws.tags().create(parent=ws_path, body=b).execute())
+            changed = True
+    if changed:
+        stamp = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+        v = plan.step("create a GTM container version (not published)",
+                      lambda: ws.create_version(path=ws_path, body={
+                          "name": f"analytics sync {stamp}", "notes": "from analytics.yaml"}).execute())
+        if v and v.get("containerVersion"):
+            cv = v["containerVersion"]
+            print(f"  version {cv.get('containerVersionId')} is ready; publish with `analytics publish` (ask first)")
+    elif not plan.lines:
+        print("  in sync: nothing to change")
+    return 0
+
+
+def cmd_publish(a) -> int:
+    p, spec = load(a.dir)
+    cont = spec["gtm"].get("container")
+    if not cont:
+        die(cc.EX_USAGE, f"{p}: run `analytics setup` first")
+    versions = svc("tagmanager", "v2").accounts().containers().versions()
+    if a.version:
+        path = f"{cont}/versions/{a.version}"
+    else:
+        head = svc("tagmanager", "v2").accounts().containers().version_headers().latest(parent=cont).execute()
+        if not head.get("path"):
+            die(cc.EX_USAGE, "no container version yet: run `analytics sync`")
+        path = head["path"]
+    r = versions.publish(path=path).execute()
+    print(f"published {r['containerVersion']['containerVersionId']} of {spec['gtm'].get('public_id')}")
+    return 0
+
+
+def days_range(n: int) -> list[dict]:
+    return [{"startDate": f"{n}daysAgo", "endDate": "today"}]
+
+
+def cmd_report(a) -> int:
+    p, spec = load(a.dir)
+    r = (spec.get("reports") or {}).get(a.name)
+    if not r:
+        die(cc.EX_USAGE, f"{p}: no report {a.name!r} (have: {', '.join(spec.get('reports') or {}) or 'none'})")
+    body = {"dateRanges": days_range(a.days), "dimensions": [{"name": x} for x in r.get("dimensions") or []],
+            "metrics": [{"name": x} for x in r["metrics"]], "limit": r.get("limit", 25)}
+    if r.get("order_by"):
+        body["orderBys"] = [{"metric": {"metricName": r["order_by"]}, "desc": True}]
+    out = svc("analyticsdata", "v1beta").properties().runReport(property=spec["ga"]["property"], body=body).execute()
+    heads = [h["name"] for h in out.get("dimensionHeaders", [])] + [h["name"] for h in out.get("metricHeaders", [])]
+    print(f"{spec['project']} · {a.name} · last {a.days} days\n")
+    print("| " + " | ".join(heads) + " |\n|" + "---|" * len(heads))
+    for row in out.get("rows", []):
+        print("| " + " | ".join(v["value"] for v in row.get("dimensionValues", []) + row.get("metricValues", [])) + " |")
+    if not out.get("rows"):
+        print("(no data yet)")
+    return 0
+
+
+def cmd_funnel(a) -> int:
+    p, spec = load(a.dir)
+    f = (spec.get("funnels") or {}).get(a.name)
+    if not f:
+        die(cc.EX_USAGE, f"{p}: no funnel {a.name!r} (have: {', '.join(spec.get('funnels') or {}) or 'none'})")
+    import google_auth
+    from google.auth.transport.requests import AuthorizedSession
+    body = {"dateRanges": days_range(a.days), "funnel": {"isOpenFunnel": bool(f.get("open")), "steps": [
+        {"name": s, "filterExpression": {"funnelEventFilter": {"eventName": s}}} for s in f["steps"]]}}
+    # runFunnelReport is v1alpha and not in the client library's discovery document: call REST directly.
+    r = AuthorizedSession(google_auth.credentials()).post(
+        f"https://analyticsdata.googleapis.com/v1alpha/{spec['ga']['property']}:runFunnelReport", json=body, timeout=60)
+    if r.status_code != 200:
+        msg = r.json().get("error", {}).get("message", r.text) if r.headers.get("content-type", "").startswith("application/json") else r.text
+        die(cc.EX_FAIL, f"Google API {r.status_code}: {msg.split('. Enable it by visiting')[0][:300]}"
+                        + ("\n  enable it: console.cloud.google.com → APIs & Services → Library → analyticsdata.googleapis.com"
+                           if "has not been used" in msg or "is disabled" in msg else ""))
+    table = r.json().get("funnelTable", {})
+    print(f"{spec['project']} · funnel {a.name} · last {a.days} days\n")
+    heads = [h["name"] for h in table.get("dimensionHeaders", [])] + [h["name"] for h in table.get("metricHeaders", [])]
+    print("| " + " | ".join(heads) + " |\n|" + "---|" * len(heads))
+    for row in table.get("rows", []):
+        print("| " + " | ".join(v.get("value", "") for v in row.get("dimensionValues", []) + row.get("metricValues", [])) + " |")
+    if not table.get("rows"):
+        print("(no data yet)")
+    return 0
+
+
+def cmd_snippet(a) -> int:
+    p, spec = load(a.dir)
+    gid = spec["gtm"].get("public_id") or "GTM-XXXXXXX"
+    print(f"""<!-- Google Tag Manager: in <head>, as high as possible -->
+<script>(function(w,d,s,l,i){{w[l]=w[l]||[];w[l].push({{'gtm.start':new Date().getTime(),event:'gtm.js'}});
+var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;
+j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+}})(window,document,'script','dataLayer','{gid}');</script>
+
+<!-- right after <body> -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id={gid}" height="0" width="0"
+style="display:none;visibility:hidden"></iframe></noscript>
+
+Next.js (app router): `pnpm add @next/third-parties`, then in app/layout.tsx:
+  import {{ GoogleTagManager }} from '@next/third-parties/google'
+  <html><GoogleTagManager gtmId="{gid}" /><body>…</body></html>
+
+Events (from analytics.yaml), pushed where they happen:""")
+    for e in spec.get("events") or []:
+        ps = ", ".join(f"{x}: …" for x in e.get("params") or [])
+        print(f"  window.dataLayer.push({{ event: '{e['name']}'{', ' + ps if ps else ''} }})")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="analytics", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("accounts")
+    p = sub.add_parser("init")
+    p.add_argument("dir", nargs="?")
+    p.add_argument("--project")
+    p.add_argument("--domain")
+    for name in ("setup", "sync"):
+        p = sub.add_parser(name)
+        p.add_argument("dir", nargs="?")
+        p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("publish")
+    p.add_argument("dir", nargs="?")
+    p.add_argument("--version")
+    for name in ("funnel", "report"):
+        p = sub.add_parser(name)
+        p.add_argument("dir", nargs="?")
+        p.add_argument("name")
+        p.add_argument("--days", type=int, default=28)
+    p = sub.add_parser("snippet")
+    p.add_argument("dir", nargs="?")
+    a = ap.parse_args()
+    if OFFLINE and hasattr(a, "dry_run"):
+        a.dry_run = True  # offline can only plan
+    return {"accounts": cmd_accounts, "init": cmd_init, "setup": cmd_setup, "sync": cmd_sync, "publish": cmd_publish,
+            "funnel": cmd_funnel, "report": cmd_report, "snippet": cmd_snippet}[a.cmd](a)
+
+
+def run() -> int:
+    from googleapiclient.errors import HttpError
+    try:
+        return main()
+    except HttpError as e:
+        reason = (e.reason or "").split(". Enable it by visiting")[0]
+        hint = ""
+        if "has not been used in project" in str(e) or "is disabled" in str(e):
+            api = re.search(r"apis/api/([a-z.]+)/", str(e))
+            hint = f"\n  enable it: console.cloud.google.com → APIs & Services → Library → {api.group(1) if api else 'that API'}"
+        raise cc.CCError(cc.EX_FAIL, f"Google API {e.status_code}: {reason}{hint}")
+
+
+if __name__ == "__main__":
+    cc.run_main(run)
