@@ -72,7 +72,6 @@
     ],
     "ask": [
       "Bash(git push:*)",
-      "Bash(rm:*)",
       "Bash(brew uninstall:*)",
       "Bash(rclone:*)",
       "Bash(~/claude-computer/bin/archive-push:*)",
@@ -203,6 +202,18 @@
           {
             "type": "command",
             "command": "~/.claude/hooks/notify.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/rm-guard.py",
+            "timeout": 10
           }
         ]
       }
