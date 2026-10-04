@@ -6,3 +6,7 @@
 
 # ripgrep reads no config file unless this points at one.
 export RIPGREP_CONFIG_PATH="$HOME/.config/ripgrep/ripgreprc"
+
+# sops reads the age key from here (its macOS default is ~/Library/Application Support/sops/) —
+# the same path bin/secrets uses, so a plain `sops` in a terminal finds the key too.
+export SOPS_AGE_KEY_FILE="$HOME/.config/sops/age/keys.txt"

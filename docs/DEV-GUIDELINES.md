@@ -30,7 +30,7 @@ Python and TypeScript. Nothing else unless a platform forces it (Swift for a Mac
 ## Secrets
 
 - Values live in the instance's sops store (`docs/SECRETS.md`). Locally, run with `secrets exec --only NAME,… -- <cmd>`, or let `.envrc` (direnv) `eval "$(secrets env --only NAME,…)"`; `.env` files are git-ignored.
-- `.env.local` holds local, non-secret values only — a local database file, test-mode keys. A real key never goes in it: a dev server or tool that needs one starts under `secrets exec` (a `just run` that does it for you), or gets it from `.envrc`.
+- No secret in any `.env` file. `.env.local` holds local, non-secret values only — a local database file, URLs, test-mode keys. A dev server or tool that needs a real key starts under `secrets exec` (a `just run` that does it for you), or gets it from `.envrc`, which loads each key on its own so one not stored yet is reported and skipped (the templates' `.envrc`).
 - In deploys: `wrangler secret put`, EAS secrets, GitHub Actions secrets — set from the store under `secrets exec`, never pasted, never committed.
 
 ## Commits
@@ -79,7 +79,7 @@ Two tools, two jobs. **PostHog** is product analytics: what people do inside the
 5. **Funnels**: name them in `analytics.yaml` as ordered steps (`signup: {steps: [page_view, sign_up]}`; `open: true` for funnels people can enter mid-way). `analytics funnel <name> [--days N]` runs one against GA's Data API. GA's API cannot save a funnel into Explore, so the file is where funnels live — reviewed and versioned like code.
 6. **Reports**: likewise, `reports:` in `analytics.yaml` names a set of dimensions and metrics (GA4 Data API names: `sessionDefaultChannelGroup`, `landingPage`, `sessions`, `keyEvents` …), and `analytics report <name> [--days N]` prints it as a table. Every site keeps at least `acquisition` (channel and source → sessions, users, key events) and `landing-pages`.
 
-Consent: on a site with visitors from the EU or UK, GTM's consent mode and a cookie banner come before any of this goes live.
+Consent: every public site gets a cookie banner and GTM's Consent Mode before any of this goes live — denied by default, for every visitor, until they press Allow; Decline keeps it that way, and a "Cookie settings" link in the footer asks again. Before Allow, GA still receives cookieless pings, so a privacy page must not say nothing is sent. PostHog sets device storage too: the same banner gates it (opted out, persistence off, until Allow), or the project uses PostHog's cookieless mode (a project setting).
 
 ## Headless browsing
 

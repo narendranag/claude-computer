@@ -161,6 +161,33 @@ cc_sops_set() {
     cc_die "$EX_FAIL" "sops could not write '$name.$field' (is this machine a recipient? secrets status)"
 }
 
+# cc_timeout <seconds> <cmd> [args…] — run a command, killed after <seconds>: coreutils `timeout`
+# (or Homebrew's `gtimeout`), else perl's alarm, which macOS always has. Exit 124/142 on a timeout.
+cc_timeout() {
+  local s="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$s" "$@"
+  else perl -e 'alarm shift; exec @ARGV or exit 127' "$s" "$@"
+  fi
+}
+
+# cc_sops_unset <name> <field> — remove one value, and its name once no field is left. Exit 5 if not set.
+cc_sops_unset() {
+  local name="$1" field="$2"
+  cc_secret_name_ok "$name" "$field" || cc_die "$EX_USAGE" "not a secret name: $name.$field (want <name>.<field>)"
+  cc_sops_need
+  cc_need yq
+  [ -f "$CC_SECRETS_FILE" ] || cc_die "$EX_CONFIG" "no secrets store at $CC_SECRETS_FILE"
+  # Names are in clear in the store, so presence is read without decrypting anything.
+  N="$name" F="$field" yq -e '.[strenv(N)] | has(strenv(F))' "$CC_SECRETS_FILE" >/dev/null 2>&1 ||
+    cc_die "$EX_CONFIG" "not set: $name.$field"
+  sops unset "$CC_SECRETS_FILE" "[\"$name\"][\"$field\"]" 2>/dev/null ||
+    cc_die "$EX_FAIL" "sops could not remove '$name.$field' (is this machine a recipient? secrets status)"
+  if [ "$(N="$name" yq '.[strenv(N)] | length' "$CC_SECRETS_FILE" 2>/dev/null)" = "0" ]; then
+    sops unset "$CC_SECRETS_FILE" "[\"$name\"]" 2>/dev/null || cc_err "removed $name.$field; the empty '$name' is left"
+  fi
+}
+
 # cc_remote_visibility <repo dir> — PRIVATE | INTERNAL | PUBLIC for a GitHub origin, NONE with no
 # origin, UNKNOWN when it can't be read (no gh, offline, not GitHub).
 cc_remote_visibility() {
@@ -169,7 +196,8 @@ cc_remote_visibility() {
   [ -n "$origin" ] || { echo NONE; return 0; }
   command -v gh >/dev/null 2>&1 || { echo UNKNOWN; return 0; }
   slug="$(printf '%s' "$origin" | sed -e 's#^.*github\.com[:/]##' -e 's#\.git$##')"
-  v="$(gh repo view "$slug" --json visibility --jq .visibility 2>/dev/null || true)"
+  # A slow GitHub API must not hang the caller: no answer in 15 s is UNKNOWN, and the caller doesn't push.
+  v="$(cc_timeout 15 gh repo view "$slug" --json visibility --jq .visibility 2>/dev/null || true)"
   case "$v" in PRIVATE | INTERNAL | PUBLIC) echo "$v" ;; *) echo UNKNOWN ;; esac
 }
 

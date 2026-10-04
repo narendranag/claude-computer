@@ -60,6 +60,13 @@ Style these classes; they are the whole vocabulary.
 
 - Every list: `<ol|ul class="dash-list dash-<slot>">` of `<li class="dash-item dash-<kind>">`. An empty list is `<p class="dash-empty">` instead.
 - Inside an item: `.dash-text` (the main text), `.dash-note` (a secondary line, may be absent), `.dash-badge` (a short status word), `time.dash-time` (when that row last changed).
+- **The order inside each item is fixed**, so lay every part out explicitly (its own grid area or row and column) and never put two parts in the same cell — a long text wraps; it doesn't run under the badge or the time:
+  - task: `.dash-badge`, `.dash-text`, `.dash-note` (may be absent), `time.dash-time`
+  - question: `.dash-badge`, `p.dash-text`, `p.dash-default`, `time.dash-time`
+  - deliverable: `a.dash-link.dash-text`, `.dash-note` (may be absent), `time.dash-time`
+  - blocker: `.dash-text`, `time.dash-time`
+
+  A `+` selector matches only the very next sibling: `.dash-badge + .dash-time` never matches, because the text sits between them. Use `~`, or style each part on its own. The page is rejected if a `+` joins two parts that are never neighbours.
 - **Tasks** (`.dash-task`) carry `data-status`: `pending`, `in_progress`, `done`, `blocked` or `cancelled`. Give each a distinct, colour-blind-safe treatment that also works without colour (the badge text says the status). Done and cancelled should recede; in progress and blocked should stand out.
 - **Questions** (`.dash-question`) carry `data-default`: `proposed` (a default exists, not applied), `applied` (the agent applied its default and carried on) or `hold` (it needs an answer; nothing proceeds on it). They contain `.dash-text` (the question) and `.dash-default` holding `.dash-label` and the proposed default. `hold` should be the most prominent thing on the page.
 - **Deliverables** (`.dash-deliverable`) contain `a.dash-link`.
