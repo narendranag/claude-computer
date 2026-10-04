@@ -24,7 +24,7 @@ You design the layout and styles of a progress dashboard: one HTML page that som
 ## What you receive
 
 - **Task**: the title, the goal, and the tasks known so far, so you can size the layout. The counts will change.
-- **Style**: light or dark, dense or airy, one accent colour; or a brand's own guidance, which wins where it says something.
+- **Style**: light, dark or auto, dense or airy, one accent colour; or a brand's own guidance, which wins where it says something.
 - **Design guidance**: general principles, and sometimes a design skill's text. Follow it where it fits a single-page status dashboard.
 
 ## What you return
@@ -69,7 +69,7 @@ Style these classes; they are the whole vocabulary.
 ### The CSS
 
 - Self-contained and offline: system font stacks only. No `url(`, `@import`, `@font-face`, no backslashes, no `<`. At-rules allowed: `@media`, `@supports`, `@keyframes`, `@container`, `@layer`.
-- The `<html>` element carries `data-theme="light"` or `data-theme="dark"`; the saved style says which. Define colours as custom properties on `:root`.
+- The `<html>` element carries `data-theme="light"`, `"dark"` or `"auto"`; the saved style says which. Define colours as custom properties on `:root`. For `auto`, define both palettes and switch with `@media (prefers-color-scheme: dark)`, so the page follows the system.
 - Readable at a glance from across a desk: clear hierarchy, generous contrast (WCAG AA at least), the accent used sparingly for what needs attention.
 - "dense" means more rows on one screen; "airy" means more space and larger type. Both must work from a phone's width to a wide monitor without horizontal scrolling.
 - Long text wraps; it never overflows its column.

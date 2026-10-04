@@ -118,6 +118,9 @@ absent "$PROJ/.dashboard"
 if [ "$(calls)" = 0 ]; then ok "designer not called"; else bad "designer called without a style"; fi
 
 case_new "style: validation and saving"
+dash style --theme auto --accent '#000000'
+check_exit 0 $?
+contains "$CASE/xdg/claude-dashboard/style.json" '"theme": "auto"'
 dash style --theme dark --accent 'blue'
 check_exit 2 $?
 contains "$OUT" "hex colour"

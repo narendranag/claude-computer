@@ -11,7 +11,7 @@ Every later command changes facts only and never calls the designer. Every times
 computer's clock, and a row keeps its timestamp when its contents don't change.
 
 Usage:
-  dashboard style [--theme light|dark] [--density dense|airy] [--accent '#rrggbb'] [--brand FILE]
+  dashboard style [--theme light|dark|auto] [--density dense|airy] [--accent '#rrggbb'] [--brand FILE]
   dashboard init TITLE [--goal TEXT] [--task ID=TITLE ...] [--replace]
   dashboard task ID STATUS [TITLE] [--note TEXT]
   dashboard question ID [TEXT] [--default TEXT] [--applied | --hold | --proposed] [--answer TEXT]
@@ -216,7 +216,7 @@ def load_style() -> dict | None:
 def need_style() -> dict:
     style = load_style()
     if not style:
-        die(cc.EX_CONFIG, "no saved style yet. Ask the user: light or dark? dense or airy? one accent colour? "
+        die(cc.EX_CONFIG, "no saved style yet. Ask the user: light, dark, or auto (follow the system)? dense or airy? one accent colour? "
                           "— or a brand's style to follow instead. Then save it with "
                           "`dashboard style --theme … --density … --accent '#rrggbb'` (or `--brand FILE`).")
     return style
@@ -735,7 +735,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("style")
-    p.add_argument("--theme", choices=("light", "dark"))
+    p.add_argument("--theme", choices=("light", "dark", "auto"))
     p.add_argument("--density", choices=("dense", "airy"))
     p.add_argument("--accent")
     p.add_argument("--brand")
