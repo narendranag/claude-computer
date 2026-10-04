@@ -5,7 +5,7 @@
 #
 # Cases: (1) init writes a starter analytics.yaml and refuses to overwrite it · (2) setup and sync plan
 # the right GA and GTM objects, write nothing, and never publish · (3) the spec is validated: event
-# names, funnel steps, custom dimensions, report metrics, missing project/domain · (4) snippet prints the
+# names, funnel steps, custom dimensions (parameter and GA-safe name), report metrics, missing project/domain · (4) snippet prints the
 # GTM tags and one dataLayer.push per event · (5) a missing analytics.yaml is a clear error
 #
 # Exit codes: 0 every case passed · 1 a case failed
@@ -68,6 +68,16 @@ contains "$OUT" "would GTM GA4 event tag for 'sign_up' with method"
 contains "$OUT" "would create a GTM container version (not published)"
 lacks "$OUT" "publish "
 if cmp -s "$WORK/before.yaml" "$D/analytics.yaml"; then ok "analytics.yaml unchanged"; else bad "analytics.yaml changed"; fi
+printf 'google_tag:\n  page_location: clean_url\n' >> "$D/analytics.yaml"
+run sync "$D"
+check_exit 0 $?
+contains "$OUT" "would GTM data-layer variable 'clean_url'"
+contains "$OUT" "would GTM Google tag fields: page_location = {{dlv - clean_url}}"
+printf 'google_tag:\n  Page-Location: x\n' > "$WORK/gt.yaml"; sed '/^google_tag:/,$d' "$D/analytics.yaml" > "$WORK/base.yaml"
+cat "$WORK/base.yaml" "$WORK/gt.yaml" > "$D/analytics.yaml"
+run sync "$D"
+check_exit 2 $?
+contains "$OUT" "google_tag 'Page-Location'"
 
 case_new "the spec is validated"
 cat > "$D/analytics.yaml" <<'EOF'
@@ -80,6 +90,7 @@ events:
   - name: purchase
 custom_dimensions:
   - parameter: plan
+  - {parameter: value, name: Order-value}
 funnels:
   one: {steps: [page_view]}
   ghost: {steps: [page_view, checkout]}
@@ -91,6 +102,7 @@ check_exit 2 $?
 contains "$OUT" "event name 'Sign-Up'"
 contains "$OUT" "event names repeat"
 contains "$OUT" "custom dimension 'plan' is not a parameter of any event"
+contains "$OUT" "custom dimension name 'Order-value'"
 contains "$OUT" "funnel one: needs at least two steps"
 contains "$OUT" "funnel ghost: step 'checkout' is not an event in this file"
 contains "$OUT" "report empty: needs metrics"

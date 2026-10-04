@@ -18,12 +18,15 @@ analytics.yaml (project root) is the source of truth; `setup` and `sync` apply i
     - name: sign_up
       key_event: true              # a GA "key event" (conversion)
       params: [method]
+  google_tag:                      # optional: Google tag fields read from the data layer (sync sets them),
+    page_location: page_location   #   e.g. to send a URL with its query string cut off
   custom_dimensions:               # event parameters you want to report on
-    - {parameter: method, name: Sign-up method}
+    - {parameter: method, name: Sign up method}
   funnels:
     signup: {steps: [page_view, sign_up], open: false}
   reports:
     acquisition: {dimensions: [sessionDefaultChannelGroup], metrics: [sessions, totalUsers, keyEvents]}
+    sign-ups: {event: sign_up, dimensions: ["customEvent:method"], metrics: [eventCount]}   # one event only
 
 Usage:
   analytics accounts                          GA accounts and properties, GTM accounts and containers
@@ -63,6 +66,7 @@ from ruamel.yaml import YAML  # noqa: E402
 
 ALL_PAGES = "2147479553"  # GTM's built-in "All Pages" trigger
 EVENT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+DIMENSION_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_ ]{0,81}$")
 OFFLINE = os.environ.get("ANALYTICS_OFFLINE") == "1"
 yaml = YAML()
 yaml.preserve_quotes = True
@@ -123,6 +127,16 @@ def validate(p: Path, spec: dict) -> None:
     for cd in spec.get("custom_dimensions") or []:
         if cd.get("parameter") not in params:
             errors.append(f"custom dimension {cd.get('parameter')!r} is not a parameter of any event")
+        # GA rejects any other character in a display name (Google API 400), so say so before calling it.
+        dname = str(cd.get("name") or cd.get("parameter") or "")
+        if not DIMENSION_NAME.match(dname):
+            errors.append(f"custom dimension name {dname!r}: letters, digits, underscores and spaces, starting with a letter, at most 82 characters")
+    gt = spec.get("google_tag") or {}
+    if not isinstance(gt, dict):
+        errors.append("google_tag: a mapping of GA field to data-layer key, e.g. {page_location: page_location}")
+    else:
+        errors += [f"google_tag {f!r}: field and data-layer key must be snake_case" for f, k in gt.items()
+                   if not (EVENT_NAME.match(str(f)) and EVENT_NAME.match(str(k)))]
     if errors:
         die(cc.EX_USAGE, f"{p}:\n  - " + "\n  - ".join(errors))
 
@@ -198,7 +212,7 @@ events:
     key_event: true
 custom_dimensions:
   - parameter: method
-    name: Sign-up method
+    name: Sign up method
 funnels:
   signup:
     steps: [page_view, sign_up]
@@ -327,7 +341,8 @@ def cmd_sync(a) -> int:
         triggers = ws.triggers().list(parent=ws_path).execute().get("trigger", [])
         tags = ws.tags().list(parent=ws_path).execute().get("tag", [])
     changed = False
-    for param in sorted({p for e in events for p in e.get("params") or []}):
+    gfields = dict(spec.get("google_tag") or {})  # GA field -> data-layer key, set on the Google tag
+    for param in sorted({p for e in events for p in e.get("params") or []} | set(gfields.values())):
         vname = f"dlv - {param}"
         if not find(variables, "name", vname):
             body = {"name": vname, "type": "v", "parameter": [
@@ -356,6 +371,29 @@ def cmd_sync(a) -> int:
                                   {"type": "list", "key": "eventSettingsTable", "list": params}]}
             plan.step(f"GTM GA4 event tag for {n!r}" + (f" with {', '.join(e.get('params') or [])}" if e.get("params") else ""),
                       lambda b=body: ws.tags().create(parent=ws_path, body=b).execute())
+            changed = True
+    if gfields:
+        gtag = next((t for t in tags if t.get("type") == "googtag"), None)
+        if not OFFLINE and not gtag:
+            die(cc.EX_USAGE, f"{p}: no Google tag in the workspace: run `analytics setup` first")
+        want = {f: f"{{{{dlv - {k}}}}}" for f, k in sorted(gfields.items())}
+        have = {}
+        rest = []
+        for prm in (gtag or {}).get("parameter", []):
+            if prm.get("key") == "configSettingsTable":
+                for row in prm.get("list", []):
+                    m = {x.get("key"): x.get("value") for x in row.get("map", [])}
+                    have[m.get("parameter")] = m.get("parameterValue")
+            else:
+                rest.append(prm)
+        if any(have.get(f) != v for f, v in want.items()):
+            merged = {**have, **want}
+            table = [{"type": "map", "map": [{"type": "template", "key": "parameter", "value": f},
+                                             {"type": "template", "key": "parameterValue", "value": v}]}
+                     for f, v in sorted(merged.items())]
+            body = {**(gtag or {}), "parameter": rest + [{"type": "list", "key": "configSettingsTable", "list": table}]}
+            plan.step("GTM Google tag fields: " + ", ".join(f"{f} = {v}" for f, v in want.items()),
+                      lambda b=body: ws.tags().update(path=b["path"], body=b).execute())
             changed = True
     if changed:
         stamp = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
@@ -401,6 +439,8 @@ def cmd_report(a) -> int:
             "metrics": [{"name": x} for x in r["metrics"]], "limit": r.get("limit", 25)}
     if r.get("order_by"):
         body["orderBys"] = [{"metric": {"metricName": r["order_by"]}, "desc": True}]
+    if r.get("event"):  # count only this event (e.g. an event's parameter as the dimension)
+        body["dimensionFilter"] = {"filter": {"fieldName": "eventName", "stringFilter": {"value": r["event"]}}}
     out = svc("analyticsdata", "v1beta").properties().runReport(property=spec["ga"]["property"], body=body).execute()
     heads = [h["name"] for h in out.get("dimensionHeaders", [])] + [h["name"] for h in out.get("metricHeaders", [])]
     print(f"{spec['project']} · {a.name} · last {a.days} days\n")
@@ -431,7 +471,8 @@ def cmd_funnel(a) -> int:
                            if "has not been used" in msg or "is disabled" in msg else ""))
     table = r.json().get("funnelTable", {})
     print(f"{spec['project']} · funnel {a.name} · last {a.days} days\n")
-    heads = [h["name"] for h in table.get("dimensionHeaders", [])] + [h["name"] for h in table.get("metricHeaders", [])]
+    heads = list(dict.fromkeys([h["name"] for h in table.get("dimensionHeaders", [])]
+                               + [h["name"] for h in table.get("metricHeaders", [])]))  # the API can repeat headers
     print("| " + " | ".join(heads) + " |\n|" + "---|" * len(heads))
     for row in table.get("rows", []):
         print("| " + " | ".join(v.get("value", "") for v in row.get("dimensionValues", []) + row.get("metricValues", [])) + " |")

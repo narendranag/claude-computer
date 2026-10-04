@@ -9,7 +9,7 @@ Upstream: $ARGUMENTS
 
 1. Identify the change in this instance (files, commits). Explain the lesson in two sentences.
 2. Clone the template fresh into a temp dir: `gh repo clone <template> "$(mktemp -d)/template"` (the `upstream` remote URL tells you which), and branch `upstream/<slug>`.
-3. **Rewrite, don't copy.** Re-implement the change generically in the clone: no hostnames, Tailscale names, emails, usernames, chat IDs, paths under a real home, personal folder names, services only I use. Use placeholders like `example-laptop` and `<person>`.
+3. **Never carry a section headed "This instance (not for upstream)"** (an instance may add one to any shared document, such as DEV-GUIDELINES). **Rewrite, don't copy.** Re-implement the change generically in the clone: no hostnames, Tailscale names, emails, usernames, chat IDs, paths under a real home, personal folder names, services only I use. Use placeholders like `example-laptop` and `<person>`.
 4. Hygiene before committing, in the clone:
    - `gitleaks git --redact --no-banner` and `gitleaks dir . --redact --no-banner`
    - `rg -i "$(whoami)|$(scutil --get LocalHostName)|<tailnet name>|@gmail|@icloud"` → must be empty

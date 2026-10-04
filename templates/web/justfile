@@ -18,5 +18,10 @@ lint:
 
 run: dev
 
+# The production build under Cloudflare's runtime, locally (OpenNext + wrangler).
+preview:
+    pnpm run preview
+
+# OpenNext build + wrangler deploy to Workers. `pnpm run deploy`, never `pnpm deploy` (pnpm's own command).
 deploy:
-    pnpm build && pnpm wrangler deploy
+    pnpm run deploy

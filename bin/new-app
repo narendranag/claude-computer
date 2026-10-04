@@ -43,9 +43,21 @@ step "scaffold $type app at $dir"
 [ "$dry" -eq 1 ] || mkdir -p "$parent"
 case "$type" in
   web)     cc_need pnpm; do_ pnpm create next-app@latest "$dir" --ts --tailwind --eslint --app --src-dir --use-pnpm --import-alias "@/*" --yes
-           # End-to-end tests: Playwright with its bundled Chromium (config and smoke test come from the overlay).
-           if [ "$dry" -eq 1 ]; then do_ pnpm add -D @playwright/test vitest; do_ pnpm exec playwright install chromium
-           else (cd "$dir" && pnpm add -D @playwright/test vitest && pnpm exec playwright install chromium); fi ;;
+           # End-to-end tests: Playwright pinned to the fleet's version, so its Chromium is the one already in the
+           # machine's cache (config and smoke test come from the overlay). Workers: OpenNext's adapter and wrangler
+           # (wrangler.jsonc and open-next.config.ts come from the overlay); plain `wrangler deploy` can't run Next.js.
+           pw="$(sed -n 's/^PLAYWRIGHT_VERSION="\([^"]*\)".*/\1/p' "$CC_ROOT/setup-tools.sh")"
+           [ -n "$pw" ] || cc_die "$EX_CONFIG" "no PLAYWRIGHT_VERSION in setup-tools.sh"
+           web_deps() {
+             pnpm add -D -E "@playwright/test@$pw" && pnpm add -D vitest @opennextjs/cloudflare wrangler \
+               && pnpm pkg set scripts.preview="opennextjs-cloudflare build && opennextjs-cloudflare preview" \
+                    scripts.deploy="opennextjs-cloudflare build && opennextjs-cloudflare deploy" \
+                    scripts.cf-typegen="wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts" \
+               && pnpm exec playwright install chromium
+           }
+           if [ "$dry" -eq 1 ]; then do_ pnpm add -D -E "@playwright/test@$pw"; do_ pnpm add -D vitest @opennextjs/cloudflare wrangler
+             do_ pnpm pkg set scripts.preview=… scripts.deploy=… scripts.cf-typegen=…; do_ pnpm exec playwright install chromium
+           else (cd "$dir" && web_deps); fi ;;
   mobile)  cc_need pnpm; do_ pnpm create expo-app@latest "$dir" --template default ;;
   cli)     cc_need uv;   do_ uv init --package --name "$name" "$dir"
                          [ "$dry" -eq 1 ] || (cd "$dir" && uv add typer rich && uv add --dev pytest ruff pyright) ;;

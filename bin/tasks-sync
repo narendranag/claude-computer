@@ -87,6 +87,9 @@ def find_brains(home: Path) -> list[tuple[str, Path]]:
     dirs = [home / b for b in FIXED_BRAINS]
     for c in CONTAINERS:
         for p in subdirs(home / c):
+            if (p / ".git").is_file():
+                # A linked git worktree (.git is a file): a branch of a brain listed elsewhere, not a brain.
+                continue
             if (p / "CLAUDE.md").is_file():
                 dirs.append(p)
                 # A client folder is a repo whose code lives in separate repos inside it.
