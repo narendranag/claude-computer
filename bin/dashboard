@@ -1,0 +1,802 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""dashboard — a live progress page for a long task, in the project's .dashboard/ folder.
+
+The layout is designed once per task by the dashboard designer (claude-global/agents/dashboard-designer.md,
+run headless with no tools and no context but the task's facts, the saved style and design guidance).
+Every later command changes facts only and never calls the designer. Every timestamp comes from this
+computer's clock, and a row keeps its timestamp when its contents don't change.
+
+Usage:
+  dashboard style [--theme light|dark|auto] [--density dense|airy] [--accent '#rrggbb'] [--brand FILE]
+  dashboard init TITLE [--goal TEXT] [--task ID=TITLE ...] [--replace]
+  dashboard task ID STATUS [TITLE] [--note TEXT]
+  dashboard question ID [TEXT] [--default TEXT] [--applied | --hold | --proposed] [--answer TEXT]
+  dashboard deliverable ID LABEL LINK [--note TEXT]
+  dashboard blocker ID [TEXT] [--clear]
+  dashboard remove task|question|deliverable|blocker ID
+  dashboard open | render | redesign | snapshot | show [--json] | path
+
+  style        show the saved style, or save one (first run: ask the user; --brand points at a
+               brand's guidance — CSS, tokens or prose — read when a layout is designed)
+  init         start a dashboard for a new task: save its facts, design its layout, render it.
+               An existing dashboard is refused; --replace moves it to .dashboard/archive/<time>/
+  task         add or change a task. STATUS: pending | in_progress | done | blocked | cancelled
+  question     a question waiting for the user, with the proposed default. --applied: the default
+               was applied (safe, reversible, within authority); --hold: it waits for an answer;
+               --proposed: neither yet (the default). --answer records the answer and takes it off
+               the page
+  deliverable  a deliverable and its link: an http(s) URL, or a path (absolute, or relative to the
+               project root)
+  blocker      add or change a blocker; --clear removes it
+  open         open the live page in the default browser and print what it shows
+  render       rebuild index.html from the facts and the saved layout
+  redesign     ask the designer for a new layout (only when the user asks for one)
+  snapshot     write a copy labelled as a snapshot that does not reload, for attaching
+  show         print the facts; --json for the raw state
+  path         print the live page's path
+
+  --dir DIR    the project root (default: the git work tree containing the current folder, else
+               the current folder). Writes go only to <root>/.dashboard/ and the style file.
+
+Files:
+  <root>/.dashboard/index.html     the live page: self-contained, offline, reloads every 10 s
+  <root>/.dashboard/state.json     the facts
+  <root>/.dashboard/layout.json    the last good layout (the designer's validated CSS and HTML)
+  ~/.config/claude-dashboard/style.json   the saved style ($XDG_CONFIG_HOME is honoured)
+
+The designer's output is validated before it is used: no scripts, no outside resources, only the
+allowed elements and attributes, every slot exactly once. A layout that fails is never rendered: the
+last good page stays, and the error says exactly what failed. The designer is never swapped for
+another model and no stand-in page is made.
+
+Environment: DASHBOARD_DESIGNER — a command to run instead of `claude` (tests); it reads the prompt
+on stdin, finds the system prompt at $DASHBOARD_SYSTEM_PROMPT_FILE and prints the reply.
+DASHBOARD_DESIGN_GUIDANCE — a design skill's SKILL.md to use (default: frontend-design, if installed).
+
+Exit codes: 0 ok · 1 the designer, its output or a render failed (the last good page is kept) ·
+2 usage · 3 `claude` is missing · 5 no saved style, or no dashboard here yet
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import datetime as dt
+import hashlib
+import html
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from html.parser import HTMLParser
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import cc  # noqa: E402
+
+LIB = cc.ROOT / "lib" / "dashboard"
+AGENT = cc.ROOT / "claude-global" / "agents" / "dashboard-designer.md"
+STYLE_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "claude-dashboard" / "style.json"
+
+STATUSES = ("pending", "in_progress", "done", "blocked", "cancelled")
+DEFAULTS = ("proposed", "applied", "hold")
+KINDS = ("task", "question", "deliverable", "blocker")
+REQUIRED_SLOTS = ("title", "clock", "updated", "tasks", "questions", "deliverables", "blockers")
+OPTIONAL_SLOTS = ("goal", "summary")
+ALLOWED_TAGS = set(
+    "div section header footer main aside nav article h1 h2 h3 h4 p span strong em small hr br ul ol li dl dt dd".split()
+)
+VOID_TAGS = {"hr", "br"}
+ALLOWED_ATTRS = {"class", "id", "role", "aria-label", "aria-labelledby", "aria-live", "data-slot"}
+CSS_FORBIDDEN = ("url(", "@import", "@font-face", "@namespace", "@charset", "expression(", "javascript:",
+                 "behavior:", "-moz-binding", "image-set(", "image(", "src(", "<", "\\")
+CSS_AT_RULES = {"media", "supports", "keyframes", "-webkit-keyframes", "container", "layer"}
+MAX_CSS, MAX_LAYOUT, MAX_GUIDANCE = 64_000, 32_000, 40_000
+DESIGNER_TIMEOUT = 600
+ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def die(code: int, msg: str):
+    raise cc.CCError(code, msg)
+
+
+# ---------------------------------------------------------------- clock and files
+
+
+def now() -> dt.datetime:
+    """The only source of time: this computer's clock, local zone."""
+    return dt.datetime.now().astimezone().replace(microsecond=0)
+
+
+def human(iso: str) -> str:
+    d = dt.datetime.fromisoformat(iso)
+    return f"{d:%a} {d.day} {d:%b}, {d:%H:%M}"
+
+
+def write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def project_root(arg: str | None) -> Path:
+    if arg:
+        p = Path(arg).expanduser().resolve()
+        if not p.is_dir():
+            die(cc.EX_USAGE, f"--dir {arg}: not a folder")
+        return p
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    return Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else Path.cwd()
+
+
+class Board:
+    def __init__(self, root: Path):
+        self.root = root
+        self.dir = root / ".dashboard"
+        self.state_file = self.dir / "state.json"
+        self.layout_file = self.dir / "layout.json"
+        self.page = self.dir / "index.html"
+
+    def exists(self) -> bool:
+        return self.state_file.exists()
+
+    def load(self) -> dict:
+        if not self.exists():
+            die(cc.EX_CONFIG, f"no dashboard in {self.root} yet: run `dashboard init \"<task title>\"` first")
+        return json.loads(self.state_file.read_text(encoding="utf-8"))
+
+    def save(self, state: dict) -> None:
+        write_atomic(self.state_file, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+
+
+# ---------------------------------------------------------------- facts
+
+
+def upsert(state: dict, section: str, item_id: str, fields: dict, stamp: str) -> bool:
+    """Insert or update a row. Its timestamp moves only when its contents change. Returns changed."""
+    rows = state[section]
+    for row in rows:
+        if row["id"] == item_id:
+            merged = {**row, **{k: v for k, v in fields.items() if v is not None}}
+            if {k: v for k, v in merged.items() if k != "since"} == {k: v for k, v in row.items() if k != "since"}:
+                return False
+            merged["since"] = stamp
+            rows[rows.index(row)] = merged
+            return True
+    rows.append({"id": item_id, **{k: v for k, v in fields.items() if v is not None}, "since": stamp})
+    return True
+
+
+def check_id(item_id: str) -> str:
+    if not ID_RE.match(item_id):
+        die(cc.EX_USAGE, f"id {item_id!r}: use letters, digits, '.', '_' or '-' (at most 64)")
+    return item_id
+
+
+def link_href(board: Board, link: str) -> str:
+    if re.match(r"^https?://", link, re.I):
+        return link
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", link):
+        die(cc.EX_USAGE, f"link {link!r}: only http(s) URLs and file paths")
+    p = Path(link).expanduser()
+    p = p if p.is_absolute() else (board.root / p)
+    if not p.exists():
+        print(f"dashboard: note: {link} does not exist yet", file=sys.stderr)
+    return p.resolve().as_uri()
+
+
+def new_state(title: str, goal: str | None, stamp: str) -> dict:
+    return {"version": 1, "title": title, "goal": goal or "", "created": stamp, "updated": stamp,
+            "tasks": [], "questions": [], "deliverables": [], "blockers": []}
+
+
+# ---------------------------------------------------------------- style
+
+
+def load_style() -> dict | None:
+    if not STYLE_FILE.exists():
+        return None
+    return json.loads(STYLE_FILE.read_text(encoding="utf-8"))
+
+
+def need_style() -> dict:
+    style = load_style()
+    if not style:
+        die(cc.EX_CONFIG, "no saved style yet. Ask the user: light, dark, or auto (follow the system)? dense or airy? one accent colour? "
+                          "— or a brand's style to follow instead. Then save it with "
+                          "`dashboard style --theme … --density … --accent '#rrggbb'` (or `--brand FILE`).")
+    return style
+
+
+def cmd_style(a) -> int:
+    style = load_style() or {}
+    if not any((a.theme, a.density, a.accent, a.brand)):
+        if not style:
+            print(f"no saved style ({STYLE_FILE})")
+            return cc.EX_CONFIG
+        print(json.dumps(style, indent=2))
+        return 0
+    if a.accent and not re.match(r"^#[0-9A-Fa-f]{6}$", a.accent):
+        die(cc.EX_USAGE, f"--accent {a.accent!r}: a hex colour like '#2a6df4'")
+    if a.brand:
+        brand = Path(a.brand).expanduser().resolve()
+        if not brand.is_file():
+            die(cc.EX_USAGE, f"--brand {a.brand}: not a file")
+        style["brand"] = str(brand)
+    for k in ("theme", "density", "accent"):
+        if getattr(a, k):
+            style[k] = getattr(a, k)
+    style.setdefault("theme", "light")
+    style.setdefault("density", "airy")
+    if "accent" not in style and "brand" not in style:
+        die(cc.EX_USAGE, "give an --accent colour, or a --brand to take it from")
+    write_atomic(STYLE_FILE, json.dumps(style, indent=2) + "\n")
+    print(f"saved {STYLE_FILE}")
+    return 0
+
+
+# ---------------------------------------------------------------- the designer
+
+
+def agent_parts() -> tuple[dict, str]:
+    text = AGENT.read_text(encoding="utf-8")
+    m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.S)
+    if not m:
+        die(cc.EX_FAIL, f"{AGENT}: no frontmatter")
+    meta = dict(re.findall(r"^(\w+):\s*(.*?)\s*$", m.group(1), re.M))
+    body = re.sub(r"<!--.*?-->", "", m.group(2), flags=re.S).strip()
+    return meta, body
+
+
+def design_guidance() -> tuple[str, str]:
+    """(source, text) of an installed design skill, or ('', '')."""
+    env = os.environ.get("DASHBOARD_DESIGN_GUIDANCE")
+    if env is not None:
+        p = Path(env)
+        return (str(p), p.read_text(encoding="utf-8")[:MAX_GUIDANCE]) if env and p.is_file() else ("", "")
+    claude = Path.home() / ".claude"
+    found = [claude / "skills" / "frontend-design" / "SKILL.md"]
+    found += sorted(claude.glob("plugins/cache/*/frontend-design/*/skills/frontend-design/SKILL.md"),
+                    key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in found:
+        if p.is_file():
+            return str(p), p.read_text(encoding="utf-8")[:MAX_GUIDANCE]
+    return "", ""
+
+
+def designer_prompt(state: dict, style: dict, errors: list[str] | None) -> str:
+    parts = ["# Task", f"Title: {state['title']}"]
+    if state["goal"]:
+        parts.append(f"Goal: {state['goal']}")
+    if state["tasks"]:
+        parts.append("Tasks so far:\n" + "\n".join(f"- [{t['status']}] {t['title']}" for t in state["tasks"]))
+    parts.append(f"\n# Style\nTheme: {style.get('theme')}\nDensity: {style.get('density')}")
+    if style.get("accent"):
+        parts.append(f"Accent: {style['accent']}")
+    if style.get("brand"):
+        brand = Path(style["brand"])
+        text = brand.read_text(encoding="utf-8", errors="replace")[:MAX_GUIDANCE] if brand.is_file() else ""
+        parts.append(f"Brand guidance ({brand.name}) — follow it where it speaks:\n{text}" if text
+                     else f"Brand guidance: {brand} is missing; use the theme above.")
+    source, guidance = design_guidance()
+    if guidance:
+        parts.append(f"\n# Design guidance (from {Path(source).parent.name})\n{guidance}")
+    if errors:
+        parts.append("\n# Your previous answer was rejected\n" + "\n".join(f"- {e}" for e in errors)
+                     + "\nReturn a corrected answer that follows every rule.")
+    parts.append("\nReturn the ```css block, then the ```html block.")
+    return "\n".join(parts)
+
+
+def run_designer(prompt: str) -> str:
+    meta, body = agent_parts()
+    with tempfile.TemporaryDirectory(prefix="dashboard-designer.") as tmp:
+        sp = Path(tmp) / "system-prompt.md"
+        sp.write_text(body, encoding="utf-8")
+        work = Path(tmp) / "empty"
+        work.mkdir()
+        if os.environ.get("DASHBOARD_DESIGNER"):
+            cmd = [os.environ["DASHBOARD_DESIGNER"]]
+        else:
+            if not shutil.which("claude"):
+                die(cc.EX_DEPS, "`claude` is not on the PATH; the designer runs through it")
+            cmd = ["claude", "-p", "--model", meta.get("model", "sonnet"), "--effort", meta.get("effort", "medium"),
+                   "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands",
+                   "--no-session-persistence", "--system-prompt-file", str(sp)]
+        try:
+            r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=work, timeout=DESIGNER_TIMEOUT,
+                               env={**os.environ, "DASHBOARD_SYSTEM_PROMPT_FILE": str(sp)})
+        except subprocess.TimeoutExpired:
+            die(cc.EX_FAIL, f"the designer gave no answer within {DESIGNER_TIMEOUT} s")
+    if r.returncode != 0:
+        detail = (r.stderr.strip() or r.stdout.strip())[-600:]
+        die(cc.EX_FAIL, f"the designer ({cmd[0]}) exited {r.returncode}: {detail or 'no output'}")
+    return r.stdout
+
+
+# ---------------------------------------------------------------- validation
+
+
+def extract_blocks(reply: str) -> tuple[str, str, list[str]]:
+    blocks = re.findall(r"```([A-Za-z]*)[^\n]*\n(.*?)```", reply, re.S)
+    css = [b for lang, b in blocks if lang.lower() == "css"]
+    lay = [b for lang, b in blocks if lang.lower() == "html"]
+    errors = []
+    if len(css) != 1:
+        errors.append(f"expected exactly one ```css block, found {len(css)}")
+    if len(lay) != 1:
+        errors.append(f"expected exactly one ```html block, found {len(lay)}")
+    return (css[0] if len(css) == 1 else ""), (lay[0] if len(lay) == 1 else ""), errors
+
+
+def validate_css(css: str) -> list[str]:
+    errors = []
+    if len(css) > MAX_CSS:
+        errors.append(f"CSS is {len(css)} characters; the limit is {MAX_CSS}")
+    bare = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    low = bare.lower()
+    for bad in CSS_FORBIDDEN:
+        if bad in low:
+            errors.append(f"CSS contains {bad!r}, which is not allowed")
+    for rule in sorted(set(re.findall(r"@([a-z-]+)", low)) - CSS_AT_RULES):
+        errors.append(f"CSS uses @{rule}, which is not allowed")
+    if bare.count("{") != bare.count("}"):
+        errors.append("CSS braces are unbalanced")
+    return errors
+
+
+class LayoutCheck(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.errors: list[str] = []
+        self.slots: dict[str, int] = {}
+        self.stack: list[str] = []
+        self.open_slot: str | None = None
+
+    def _bad(self, msg: str):
+        if msg not in self.errors:
+            self.errors.append(msg)
+
+    def handle_starttag(self, tag, attrs):
+        if self.open_slot:
+            self._bad(f"slot {self.open_slot!r} must be empty; it contains <{tag}>")
+        if tag not in ALLOWED_TAGS:
+            self._bad(f"<{tag}> is not an allowed element")
+        slot = None
+        for name, value in attrs:
+            value = value or ""
+            if name not in ALLOWED_ATTRS:
+                self._bad(f"attribute {name!r} on <{tag}> is not allowed")
+            elif name in ("class", "id") and not re.match(r"^[A-Za-z0-9_ -]*$", value):
+                self._bad(f"{name}={value!r} on <{tag}>: letters, digits, '-' and '_' only")
+            elif name == "data-slot":
+                if value not in REQUIRED_SLOTS + OPTIONAL_SLOTS:
+                    self._bad(f"unknown slot {value!r}")
+                slot = value
+                self.slots[value] = self.slots.get(value, 0) + 1
+            elif re.search(r"[<>]|javascript:|url\(", value, re.I):
+                self._bad(f"{name} on <{tag}> has a value that is not allowed")
+        if tag in VOID_TAGS:
+            if slot:
+                self._bad(f"slot {slot!r} is on <{tag}>, which cannot hold content")
+            return
+        self.stack.append(tag)
+        if slot:
+            self.open_slot = slot
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in VOID_TAGS and self.stack and self.stack[-1] == tag:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        if tag in VOID_TAGS:
+            return
+        if not self.stack or self.stack[-1] != tag:
+            self._bad(f"</{tag}> does not close the open element ({'<' + self.stack[-1] + '>' if self.stack else 'none'})")
+            if tag in self.stack:
+                while self.stack and self.stack.pop() != tag:
+                    pass
+            return
+        self.stack.pop()
+        self.open_slot = None
+
+    def handle_data(self, data):
+        if self.open_slot and data.strip():
+            self._bad(f"slot {self.open_slot!r} must be empty; it contains text")
+
+    def handle_decl(self, decl):
+        self._bad("declarations (<!…>) are not allowed")
+
+    def handle_pi(self, data):
+        self._bad("processing instructions are not allowed")
+
+    def unknown_decl(self, data):
+        self._bad("CDATA and unknown declarations are not allowed")
+
+
+def validate_layout(layout: str) -> list[str]:
+    if len(layout) > MAX_LAYOUT:
+        return [f"layout is {len(layout)} characters; the limit is {MAX_LAYOUT}"]
+    p = LayoutCheck()
+    p.feed(layout)
+    p.close()
+    errors = list(p.errors)
+    if p.stack:
+        errors.append(f"unclosed elements: {', '.join('<' + t + '>' for t in p.stack)}")
+    for slot in REQUIRED_SLOTS:
+        if p.slots.get(slot, 0) == 0:
+            errors.append(f"required slot {slot!r} is missing")
+    for slot, n in p.slots.items():
+        if n > 1:
+            errors.append(f"slot {slot!r} appears {n} times; once only")
+    return errors
+
+
+def design(state: dict, style: dict) -> dict:
+    """Ask the designer for a layout; one retry with the reasons. Returns a validated layout or raises."""
+    errors: list[str] | None = None
+    for attempt in (1, 2):
+        reply = run_designer(designer_prompt(state, style, errors))
+        css, layout, errors = extract_blocks(reply)
+        if not errors:
+            errors = validate_css(css) + validate_layout(layout)
+        if not errors:
+            meta, _ = agent_parts()
+            return {"css": css.strip(), "layout": layout.strip(), "designed": now().isoformat(),
+                    "model": meta.get("model", "sonnet"), "attempts": attempt}
+    die(cc.EX_FAIL, "the designer's layout was rejected twice. Last reasons:\n  - " + "\n  - ".join(errors))
+
+
+# ---------------------------------------------------------------- rendering
+
+
+def esc(s: str) -> str:
+    return html.escape(s or "", quote=True)
+
+
+def stamp_html(iso: str) -> str:
+    return f'<time class="dash-time" datetime="{esc(iso)}">{esc(human(iso))}</time>'
+
+
+def items(slot: str, rows: list[str], empty: str, ordered: bool = False) -> str:
+    if not rows:
+        return f'<p class="dash-empty">{esc(empty)}</p>'
+    tag = "ol" if ordered else "ul"
+    return f'<{tag} class="dash-list dash-{slot}">' + "".join(rows) + f"</{tag}>"
+
+
+def fill(state: dict) -> dict[str, str]:
+    t_rows = []
+    for t in state["tasks"]:
+        note = f'<span class="dash-note">{esc(t["note"])}</span>' if t.get("note") else ""
+        t_rows.append(f'<li class="dash-item dash-task" data-status="{esc(t["status"])}">'
+                      f'<span class="dash-badge">{esc(t["status"].replace("_", " "))}</span>'
+                      f'<span class="dash-text">{esc(t["title"])}</span>{note}{stamp_html(t["since"])}</li>')
+    q_label = {"proposed": "not applied", "applied": "applied", "hold": "needs your answer"}
+    q_rows = []
+    waiting = [q for q in state["questions"] if not q.get("answer")]
+    for q in sorted(waiting, key=lambda q: ("hold", "proposed", "applied").index(q.get("default_state", "proposed"))):
+        ds = q.get("default_state", "proposed")
+        default = (f'<p class="dash-default"><span class="dash-label">Proposed default:</span> {esc(q["default"])}</p>'
+                   if q.get("default") else '<p class="dash-default"><span class="dash-label">No default proposed</span></p>')
+        q_rows.append(f'<li class="dash-item dash-question" data-default="{esc(ds)}">'
+                      f'<span class="dash-badge">{esc(q_label[ds])}</span>'
+                      f'<p class="dash-text">{esc(q["text"])}</p>{default}{stamp_html(q["since"])}</li>')
+    d_rows = []
+    for d in sorted(state["deliverables"], key=lambda d: d["since"], reverse=True):
+        note = f'<span class="dash-note">{esc(d["note"])}</span>' if d.get("note") else ""
+        d_rows.append(f'<li class="dash-item dash-deliverable"><a class="dash-link dash-text" href="{esc(d["href"])}">'
+                      f'{esc(d["label"])}</a>{note}{stamp_html(d["since"])}</li>')
+    b_rows = [f'<li class="dash-item dash-blocker"><span class="dash-text">{esc(b["text"])}</span>{stamp_html(b["since"])}</li>'
+              for b in state["blockers"]]
+    counts = {s: sum(1 for t in state["tasks"] if t["status"] == s) for s in STATUSES}
+    live = sum(counts[s] for s in STATUSES if s != "cancelled")
+    summary = (f'<div class="dash-summary"><progress class="dash-progress" max="{live or 1}" value="{counts["done"]}">'
+               f'{counts["done"]} of {live}</progress>'
+               + "".join(f'<span class="dash-count" data-status="{s}">{counts[s]} {s.replace("_", " ")}</span>'
+                         for s in STATUSES if counts[s]) + "</div>")
+    return {
+        "title": esc(state["title"]),
+        "goal": esc(state["goal"]),
+        "clock": '<time class="dash-clock" aria-label="time now">--:--:--</time>',
+        "updated": f'<time class="dash-updated" datetime="{esc(state["updated"])}">{esc(human(state["updated"]))}</time> '
+                   f'<span class="dash-ago" data-since="{esc(state["updated"])}"></span>',
+        "summary": summary,
+        "tasks": items("tasks", t_rows, "No tasks yet", ordered=True),
+        "questions": items("questions", q_rows, "Nothing waiting for you"),
+        "deliverables": items("deliverables", d_rows, "No deliverables yet"),
+        "blockers": items("blockers", b_rows, "No blockers"),
+    }
+
+
+def compose(state: dict, layout: dict, style: dict, snapshot: bool = False) -> str:
+    errors = validate_css(layout.get("css", "")) + validate_layout(layout.get("layout", ""))
+    if errors:
+        die(cc.EX_FAIL, "the saved layout fails validation:\n  - " + "\n  - ".join(errors))
+    skeleton = (LIB / "page.html").read_text(encoding="utf-8")
+    scripts = re.findall(r"<script>(.*?)</script>", skeleton, re.S)
+    if len(scripts) != 1:
+        die(cc.EX_FAIL, f"{LIB / 'page.html'}: expected one inline script, found {len(scripts)}")
+    digest = base64.b64encode(hashlib.sha256(scripts[0].encode()).digest()).decode()
+    filled = fill(state)
+
+    def slot(m: re.Match) -> str:
+        return f"{m.group(1)}{filled[m.group(3)]}{m.group(4)}"
+
+    body = re.sub(r'(<([a-z0-9]+)\b[^>]*\bdata-slot="([a-z]+)"[^>]*>)\s*(</\2\s*>)', slot, layout["layout"])
+    stamp = now()
+    values = {
+        "THEME": esc(style.get("theme", "light")),
+        "SCRIPT_HASH": f"sha256-{digest}",
+        "REFRESH": "" if snapshot else '<meta http-equiv="refresh" content="10" />',
+        "PAGE_TITLE": esc(("Snapshot — " if snapshot else "") + state["title"]),
+        "CSS": layout["css"],
+        "SNAPSHOT": (f'<p class="dash-snapshot" role="alert">Snapshot taken {esc(human(stamp.isoformat()))} — '
+                     "this copy does not update. The live page is .dashboard/index.html.</p>") if snapshot else "",
+        "LAYOUT": body,
+    }
+    return re.sub(r"\{\{([A-Z_]+)\}\}", lambda m: values[m.group(1)], skeleton)
+
+
+def render(board: Board, state: dict) -> None:
+    """Rebuild index.html. On any failure the last good page stays and the error says why."""
+    if not board.layout_file.exists():
+        die(cc.EX_FAIL, f"no layout yet in {board.dir}: the designer has not produced one "
+                        "(`dashboard redesign` asks again); facts are saved")
+    try:
+        layout = json.loads(board.layout_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        die(cc.EX_FAIL, f"{board.layout_file} is unreadable ({e}); the last good page is unchanged")
+    page = compose(state, layout, load_style() or {})
+    write_atomic(board.page, page)
+
+
+# ---------------------------------------------------------------- commands
+
+
+def change(board: Board, fn) -> int:
+    """Apply fn(state, stamp) -> changed?; bump `updated` and re-render only on a real change."""
+    state = board.load()
+    stamp = now().isoformat()
+    if fn(state, stamp):
+        state["updated"] = stamp
+        board.save(state)
+        render(board, state)
+        print(f"updated {board.page}")
+    else:
+        print("no change")
+    return 0
+
+
+def cmd_init(a, board: Board) -> int:
+    style = need_style()
+    if board.exists():
+        if not a.replace:
+            old = board.load()
+            die(cc.EX_USAGE, f"a dashboard for {old['title']!r} is already here; `--replace` starts a new task "
+                             "and moves the old one to .dashboard/archive/")
+        (board.dir / "archive").mkdir(exist_ok=True)
+        dest = Path(tempfile.mkdtemp(prefix=now().strftime("%Y%m%d-%H%M%S-"), dir=board.dir / "archive"))
+        for f in (board.state_file, board.layout_file, board.page):
+            if f.exists():
+                f.rename(dest / f.name)
+        print(f"moved the previous dashboard to {dest}")
+    stamp = now().isoformat()
+    state = new_state(a.title, a.goal, stamp)
+    for spec in a.task or []:
+        tid, _, title = spec.partition("=")
+        if not title:
+            die(cc.EX_USAGE, f"--task {spec!r}: use ID=TITLE")
+        upsert(state, "tasks", check_id(tid), {"title": title, "status": "pending"}, stamp)
+    board.save(state)
+    try:
+        layout = design(state, style)
+    except cc.CCError as e:
+        die(e.code, f"{e}\nThe facts are saved in {board.state_file}; no page was made. "
+                    "`dashboard redesign` asks the designer again.")
+    write_atomic(board.layout_file, json.dumps(layout, indent=2) + "\n")
+    render(board, state)
+    print(f"created {board.page}\nopen it with `dashboard open`")
+    return 0
+
+
+def cmd_redesign(a, board: Board) -> int:
+    state = board.load()
+    layout = design(state, need_style())
+    page = compose(state, layout, load_style() or {})
+    write_atomic(board.layout_file, json.dumps(layout, indent=2) + "\n")
+    write_atomic(board.page, page)
+    print(f"redesigned {board.page}")
+    return 0
+
+
+def cmd_task(a, board: Board) -> int:
+    if a.status not in STATUSES:
+        die(cc.EX_USAGE, f"status {a.status!r}: one of {', '.join(STATUSES)}")
+
+    def fn(state, stamp):
+        known = any(t["id"] == a.id for t in state["tasks"])
+        if not known and not a.title:
+            die(cc.EX_USAGE, f"task {a.id!r} is new: give its title")
+        return upsert(state, "tasks", a.id, {"title": a.title, "status": a.status, "note": a.note}, stamp)
+
+    return change(board, fn)
+
+
+def cmd_question(a, board: Board) -> int:
+    def fn(state, stamp):
+        known = any(q["id"] == a.id for q in state["questions"])
+        if not known and not a.text:
+            die(cc.EX_USAGE, f"question {a.id!r} is new: give its text")
+        return upsert(state, "questions", a.id,
+                      {"text": a.text, "default": a.default, "default_state": a.state, "answer": a.answer}, stamp)
+
+    return change(board, fn)
+
+
+def cmd_deliverable(a, board: Board) -> int:
+    href = link_href(board, a.link)
+    return change(board, lambda s, t: upsert(s, "deliverables", a.id, {"label": a.label, "href": href, "note": a.note}, t))
+
+
+def cmd_blocker(a, board: Board) -> int:
+    def fn(state, stamp):
+        if a.clear:
+            before = len(state["blockers"])
+            state["blockers"] = [b for b in state["blockers"] if b["id"] != a.id]
+            return len(state["blockers"]) != before
+        if not a.text and not any(b["id"] == a.id for b in state["blockers"]):
+            die(cc.EX_USAGE, f"blocker {a.id!r} is new: give its text")
+        return upsert(state, "blockers", a.id, {"text": a.text}, stamp)
+
+    return change(board, fn)
+
+
+def cmd_remove(a, board: Board) -> int:
+    section = a.kind + "s"
+
+    def fn(state, stamp):
+        before = len(state[section])
+        state[section] = [r for r in state[section] if r["id"] != a.id]
+        return len(state[section]) != before
+
+    return change(board, fn)
+
+
+def cmd_render(a, board: Board) -> int:
+    render(board, board.load())
+    print(f"rendered {board.page}")
+    return 0
+
+
+def cmd_open(a, board: Board) -> int:
+    state = board.load()
+    if not board.page.exists():
+        die(cc.EX_FAIL, f"{board.page} does not exist: the layout was never rendered")
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    if not shutil.which(opener):
+        die(cc.EX_DEPS, f"`{opener}` is missing; open {board.page} by hand")
+    subprocess.run([opener, str(board.page)], check=False)
+    page = board.page.read_text(encoding="utf-8")
+    title_ok = f"<title>{esc(state['title'])}</title>" in page
+    updated_ok = f'datetime="{esc(state["updated"])}"' in page
+    print(f"opened {board.page}\n  title: {state['title']} ({'matches' if title_ok else 'DOES NOT MATCH'} the page)\n"
+          f"  last update: {human(state['updated'])} ({'matches' if updated_ok else 'DOES NOT MATCH'} the page)")
+    return 0 if title_ok and updated_ok else cc.EX_FAIL
+
+
+def cmd_snapshot(a, board: Board) -> int:
+    state = board.load()
+    layout = json.loads(board.layout_file.read_text(encoding="utf-8")) if board.layout_file.exists() else None
+    if not layout:
+        die(cc.EX_FAIL, "no layout yet; nothing to snapshot")
+    out = board.dir / f"snapshot-{now().strftime('%Y%m%d-%H%M%S')}.html"
+    write_atomic(out, compose(state, layout, load_style() or {}, snapshot=True))
+    print(out)
+    return 0
+
+
+def cmd_show(a, board: Board) -> int:
+    state = board.load()
+    if a.json:
+        print(json.dumps(state, indent=2, ensure_ascii=False))
+        return 0
+    print(f"{state['title']} — last update {human(state['updated'])}\n{board.page}")
+    for t in state["tasks"]:
+        print(f"  [{t['status']}] {t['id']}: {t['title']}")
+    for q in state["questions"]:
+        if not q.get("answer"):
+            print(f"  ? {q['id']} ({q.get('default_state', 'proposed')}): {q['text']}")
+    for b in state["blockers"]:
+        print(f"  ! {b['id']}: {b['text']}")
+    for d in state["deliverables"]:
+        print(f"  → {d['id']}: {d['label']} {d['href']}")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="dashboard", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dir")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("style")
+    p.add_argument("--theme", choices=("light", "dark", "auto"))
+    p.add_argument("--density", choices=("dense", "airy"))
+    p.add_argument("--accent")
+    p.add_argument("--brand")
+
+    p = sub.add_parser("init")
+    p.add_argument("title")
+    p.add_argument("--goal")
+    p.add_argument("--task", action="append")
+    p.add_argument("--replace", action="store_true")
+
+    p = sub.add_parser("task")
+    p.add_argument("id", type=check_id)
+    p.add_argument("status")
+    p.add_argument("title", nargs="?")
+    p.add_argument("--note")
+
+    p = sub.add_parser("question")
+    p.add_argument("id", type=check_id)
+    p.add_argument("text", nargs="?")
+    p.add_argument("--default")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--applied", dest="state", action="store_const", const="applied")
+    g.add_argument("--hold", dest="state", action="store_const", const="hold")
+    g.add_argument("--proposed", dest="state", action="store_const", const="proposed")
+    p.add_argument("--answer")
+
+    p = sub.add_parser("deliverable")
+    p.add_argument("id", type=check_id)
+    p.add_argument("label")
+    p.add_argument("link")
+    p.add_argument("--note")
+
+    p = sub.add_parser("blocker")
+    p.add_argument("id", type=check_id)
+    p.add_argument("text", nargs="?")
+    p.add_argument("--clear", action="store_true")
+
+    p = sub.add_parser("remove")
+    p.add_argument("kind", choices=KINDS)
+    p.add_argument("id", type=check_id)
+
+    for name in ("open", "render", "redesign", "snapshot", "path"):
+        sub.add_parser(name)
+    p = sub.add_parser("show")
+    p.add_argument("--json", action="store_true")
+
+    a = ap.parse_args()
+    if a.cmd == "style":
+        return cmd_style(a)
+    board = Board(project_root(a.dir))
+    if a.cmd == "path":
+        print(board.page)
+        return 0
+    if a.cmd == "question" and a.state is None and not any(q["id"] == a.id for q in board.load()["questions"]):
+        a.state = "proposed"
+    return {
+        "init": cmd_init, "redesign": cmd_redesign, "task": cmd_task, "question": cmd_question,
+        "deliverable": cmd_deliverable, "blocker": cmd_blocker, "remove": cmd_remove, "render": cmd_render,
+        "open": cmd_open, "snapshot": cmd_snapshot, "show": cmd_show,
+    }[a.cmd](a, board)
+
+
+if __name__ == "__main__":
+    cc.run_main(main)

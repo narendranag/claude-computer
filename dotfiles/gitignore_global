@@ -8,5 +8,7 @@
 .idea/
 .vscode/*.log
 **/browse/profiles/
+# bin/dashboard's live progress page — per task, never committed
+.dashboard/
 # docs-build --view — a local reading copy, regenerated
 .docs-view/

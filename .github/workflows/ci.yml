@@ -102,8 +102,16 @@ jobs:
       - name: secrets matrix
         run: ./tests/secrets.sh
 
-      # docs-build renders with pandoc and runs under uv.
+      # bin/dashboard is a uv script. Its designer is a stub here, so no case calls a model.
       - uses: astral-sh/setup-uv@v5
+      - name: dashboard matrix
+        run: ./tests/dashboard.sh
+
+      # The rm-guard hook: rm without a prompt only inside temporary folders; every other rm asks.
+      - name: rm-guard hook
+        run: ./tests/rm-guard.sh
+
+      # docs-build renders with pandoc (uv is set up above).
       - name: docs-build matrix
         run: sudo apt-get install -y -qq pandoc && ./tests/docs-build.sh
 

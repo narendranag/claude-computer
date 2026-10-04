@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+  The page skeleton bin/dashboard renders into .dashboard/index.html. It is trusted; the designer's
+  CSS and layout are not, and are validated before they are put in {{CSS}} and {{LAYOUT}}.
+  The Content-Security-Policy allows inline styles and exactly one script, the clock below, by its
+  hash ({{SCRIPT_HASH}}, computed by bin/dashboard): no network, no other script, no forms.
+  The page reloads itself every 10 seconds; a snapshot ({{REFRESH}} empty) does not.
+-->
+<html lang="en" data-theme="{{THEME}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src '{{SCRIPT_HASH}}'; base-uri 'none'; form-action 'none'"
+    />
+    {{REFRESH}}
+    <meta name="generator" content="bin/dashboard" />
+    <title>{{PAGE_TITLE}}</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      .dash-snapshot {
+        margin: 0;
+        padding: 0.6rem 1rem;
+        background: #b00020;
+        color: #fff;
+        font:
+          600 0.95rem/1.4 system-ui,
+          sans-serif;
+        text-align: center;
+      }
+    </style>
+    <style>
+      {{CSS}}
+    </style>
+  </head>
+  <body>
+    {{SNAPSHOT}} {{LAYOUT}}
+    <script>
+      (function () {
+        function pad(n) {
+          return n < 10 ? "0" + n : "" + n;
+        }
+        function ago(s) {
+          if (s < 60) return s + " s ago";
+          if (s < 3600) return Math.floor(s / 60) + " min ago";
+          if (s < 86400)
+            return (
+              Math.floor(s / 3600) +
+              " h " +
+              Math.floor((s % 3600) / 60) +
+              " min ago"
+            );
+          return Math.floor(s / 86400) + " d ago";
+        }
+        function tick() {
+          var d = new Date(),
+            i,
+            el,
+            s;
+          var clocks = document.querySelectorAll(".dash-clock");
+          for (i = 0; i < clocks.length; i++) {
+            clocks[i].textContent =
+              pad(d.getHours()) +
+              ":" +
+              pad(d.getMinutes()) +
+              ":" +
+              pad(d.getSeconds());
+            clocks[i].setAttribute("datetime", d.toISOString());
+          }
+          var since = document.querySelectorAll("[data-since]");
+          for (i = 0; i < since.length; i++) {
+            el = since[i];
+            s = Math.max(
+              0,
+              Math.round((d - new Date(el.getAttribute("data-since"))) / 1000),
+            );
+            el.textContent = ago(s);
+          }
+        }
+        tick();
+        setInterval(tick, 1000);
+      })();
+    </script>
+  </body>
+</html>
