@@ -159,7 +159,6 @@
       "Bash(tail ~/.config/sops/*)",
       "Read(~/.config/sops/**)",
       "Edit(~/.config/sops/**)",
-      "Write(~/.config/sops/**)",
       "Read(~/Library/Application Support/sops/**)"
     ]
   },

@@ -14,6 +14,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - **`rm` in temporary folders no longer prompts.** A PreToolUse hook, `claude-global/hooks/rm-guard.py`, replaces the `Bash(rm:*)` ask rule. It allows a plain `rm` whose targets are all literal absolute paths strictly inside `/tmp` or `$TMPDIR` (after resolving symlinks, with no `..`), and returns "ask" for every other `rm`: compound commands, variables, globs, `~`, `sudo`, `xargs`, relative paths, and the temporary folder itself. It fails closed. `tests/rm-guard.sh` runs in CI.
 
+### Fixed
+
+- **No more startup warning about `Write(~/.config/sops/**)`.** Claude Code matches only `Edit(path)` rules for file writes, so the `Write(...)` deny rule never matched anything and was reported at every start. It is removed; `Edit(~/.config/sops/**)` was already in the deny list, so no protection is lost.
+
 ## [0.5.0] — 2026-10-04
 
 Bitwarden leaves; machine secrets move into one sops + age file in your private instance, read by the wrappers and never by Claude. A plaintext dotenv file moves in with one command, and projects get their secrets through `secrets exec`. And the terminal changes: every Ghostty window opens into one herdr session that tracks each agent — working, blocked, done or idle — under a powerlevel10k-style prompt.
