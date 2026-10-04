@@ -3,9 +3,10 @@
 #
 # Usage: ./tests/rm-guard.sh
 #
-# Allowed: a plain rm of literal paths strictly inside /tmp or $TMPDIR. Asked: every other rm —
-# outside temp, the temp folder itself, `..`, symlinks out, variables, globs, ~, compound commands,
-# sudo, xargs. No decision: commands without rm. Bad input asks (fails closed).
+# Allowed: one plain rm of literal paths strictly inside /tmp or $TMPDIR. No decision: a chain whose
+# every rm is such an rm (relative paths count after a literal `cd /abs`), and commands without rm.
+# Asked: every other rm — outside temp, the temp folder itself, `..`, symlinks out, variables, globs,
+# ~, $( ), heredocs, redirections, sudo, xargs. Bad input asks (fails closed).
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -57,13 +58,28 @@ expect ask "$(printf 'echo hi\nrm -rf %s/x' "$HOME")"
 expect ask "rm -rf ~/x"
 expect ask "rm -rf relative/path"
 expect ask "rm -rf -- $WORK/dir"
-expect ask "rm -rf $WORK/dir && echo done"
-expect ask "cd /tmp && rm -rf x"
 expect ask "sudo rm -rf $WORK/dir"
 expect ask "ls | xargs rm"
 expect ask "/bin/rm -rf $HOME/x"
 expect ask "rm"
-expect ask "rm \"$WORK/dir\""
+
+expect ask "cd $HOME && rm -rf x"
+expect ask "rm -rf relative && cd $WORK"
+expect ask "cd $WORK && rm -rf dir && rm -rf $HOME/x"
+expect ask "cd \$D && rm -rf dir"
+expect ask "echo \$(rm -rf $WORK/dir)"
+expect ask "$(printf 'cat <<EOF\nrm -rf %s/x\nEOF' "$HOME")"
+expect ask "rm -rf $WORK/dir > /tmp/log"
+
+printf '\nno decision: a chain whose every rm is in temp (the rest is checked as usual)\n'
+expect none "rm -rf $WORK/dir && echo done"
+expect none "cd /tmp && rm -rf x"
+expect none "cd $WORK && SK=/some/skill && cp $HOME/deck.pptx deck.pptx && python3 \$SK/render.py deck.pptx && rm -rf deck.pptx out"
+expect none "$(printf 'mkdir -p %s/a\nrm -rf %s/a' "$WORK" "$WORK")"
+
+printf '\nallowed: quoted literal paths\n'
+expect allow "rm \"$WORK/dir\""
+expect allow "rm -rf '$WORK/my dir'"
 
 printf '\nno decision\n'
 expect none "ls -la /tmp"
