@@ -10,6 +10,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - **Code intelligence for Python and TypeScript.** `claude-global/settings.json` enables the official `pyright-lsp` and `typescript-lsp` plugins, so Claude navigates by symbol (definitions, references) instead of by grep, and sees type errors after each edit. Their servers come from `Brewfile.dev`: `pyright` (already there) and the new `typescript-language-server`. On a machine without the dev layer, the plugins load but find no server.
 
+### Changed
+
+- **`rm` in temporary folders no longer prompts.** A PreToolUse hook, `claude-global/hooks/rm-guard.py`, replaces the `Bash(rm:*)` ask rule. It allows a plain `rm` whose targets are all literal absolute paths strictly inside `/tmp` or `$TMPDIR` (after resolving symlinks, with no `..`), and returns "ask" for every other `rm`: compound commands, variables, globs, `~`, `sudo`, `xargs`, relative paths, and the temporary folder itself. It fails closed. `tests/rm-guard.sh` runs in CI.
+
 ## [0.5.0] — 2026-10-04
 
 Bitwarden leaves; machine secrets move into one sops + age file in your private instance, read by the wrappers and never by Claude. A plaintext dotenv file moves in with one command, and projects get their secrets through `secrets exec`. And the terminal changes: every Ghostty window opens into one herdr session that tracks each agent — working, blocked, done or idle — under a powerlevel10k-style prompt.
