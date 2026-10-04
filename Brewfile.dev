@@ -10,7 +10,8 @@ cask "calibre"                          # books and comics libraries
 brew "cloudflare-wrangler"              # Cloudflare Workers, D1, R2, DNS
 brew "biome"
 brew "ruff"
-brew "pyright"
+brew "pyright"                          # also the language server for the pyright-lsp Claude Code plugin
+brew "typescript-language-server"       # for the typescript-lsp Claude Code plugin (brings typescript)
 brew "mermaid-cli"                      # diagrams (mmdc)
 brew "ccusage"                          # Claude Code usage
 

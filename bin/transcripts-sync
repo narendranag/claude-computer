@@ -54,11 +54,12 @@ import sqlite3
 import sys
 import tempfile
 import unicodedata
+import uuid
 from pathlib import Path
 
 DEFAULT_DB = Path.home() / "Library/Application Support/MacParakeet/macparakeet.db"
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "claude-computer/transcripts-sync.json"
-ID_RE = re.compile(r"^macparakeet_id:\s*(\S+)\s*$", re.M)
+ID_RE = re.compile(r"^macparakeet_id:\s*(.+?)\s*$", re.M)
 STATUS_RE = re.compile(r"^status:\s*(\S+)\s*$", re.M)
 
 QUERY = """
@@ -68,9 +69,29 @@ SELECT id, createdAt, updatedAt, fileName, sourceURL, sourceType, durationMs, sp
 FROM transcriptions
 WHERE status = 'completed'
   AND COALESCE(NULLIF(cleanTranscript, ''), rawTranscript, '') != ''
-  AND (updatedAt > :u OR (updatedAt = :u AND id > :id))
-ORDER BY updatedAt, id
+  AND (updatedAt > :u OR (updatedAt = :u AND (CASE typeof(id) WHEN 'blob' THEN hex(id) ELSE upper(replace(id, '-', '')) END) > :idhex))
+ORDER BY updatedAt, (CASE typeof(id) WHEN 'blob' THEN hex(id) ELSE upper(replace(id, '-', '')) END)
 """
+
+
+# MacParakeet (GRDB) stores ids as 16-byte UUID blobs. Notes, the cursor and the duplicate check use
+# the UUID's text form; the database is queried with the raw value. Versions of this script before
+# 2026-10-04 wrote Python's bytes repr (macparakeet_id: b'...'); those notes are still recognised.
+def uid(v) -> str:
+    if isinstance(v, (bytes, bytearray)):
+        return str(uuid.UUID(bytes=bytes(v))).upper() if len(v) == 16 else bytes(v).hex().upper()
+    return str(v).upper()
+
+
+def legacy_uid(text: str) -> str | None:
+    """The UUID inside an old `b'...'` id, or None."""
+    if not (text.startswith(("b'", 'b"')) and text.endswith(text[1])):
+        return None
+    try:
+        import ast
+        return uid(ast.literal_eval(text))
+    except (ValueError, SyntaxError):
+        return None
 
 
 # --- cursor -----------------------------------------------------------------------
@@ -140,7 +161,7 @@ def existing_notes(vault: Path) -> dict[str, Path]:
                 continue
             m = ID_RE.search(head)
             if m:
-                found[m.group(1)] = p
+                found[legacy_uid(m.group(1)) or m.group(1).upper()] = p
     return found
 
 
@@ -180,7 +201,7 @@ def render(row: sqlite3.Row, body: str, created: str | None = None) -> str:
         f"speakers: {row['speakerCount'] or 0}",
         f"created: {created or f'{dt.date.today():%Y-%m-%d}'}",
         "tags: [transcript]",
-        f"macparakeet_id: {row['id']}",
+        f"macparakeet_id: {uid(row['id'])}",
         "---",
         "",
         f"# {row['title'] or 'Untitled'}",
@@ -240,7 +261,7 @@ def main() -> int:
 
     cursor = load_cursor(a.reset)
     try:
-        rows = con.execute(QUERY, {"u": cursor["updatedAt"], "id": cursor["id"]}).fetchall()
+        rows = con.execute(QUERY, {"u": cursor["updatedAt"], "idhex": cursor["id"].replace("-", "").upper()}).fetchall()
     except sqlite3.OperationalError as e:
         # Busy past the timeout, or MacParakeet changed its schema: say which, don't traceback.
         print(f"transcripts-sync: cannot read {a.db}: {e}", file=sys.stderr)
@@ -251,10 +272,10 @@ def main() -> int:
     reserved: set[Path] = set()
     created_re = re.compile(r"^created:\s*(\S+)\s*$", re.M)
     for row in rows:
-        rid = row["id"]
+        rid = uid(row["id"])
         # Speaker-labelled segments read best, unless you edited the transcript in MacParakeet:
         # the edit lives in cleanTranscript, and it wins.
-        body = (None if row["isTranscriptEdited"] else segments_body(con, rid)) or row["body"]
+        body = (None if row["isTranscriptEdited"] else segments_body(con, row["id"])) or row["body"]
         prior = known.get(rid)
         prior_created = None
         if prior is not None:
@@ -300,4 +321,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as e:  # one line for the session-start hook, which shows only the first line
+        print(f"transcripts-sync: failed: {type(e).__name__}: {e}", file=sys.stderr)
+        sys.exit(1)

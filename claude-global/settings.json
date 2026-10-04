@@ -74,7 +74,6 @@
     ],
     "ask": [
       "Bash(git push:*)",
-      "Bash(rm:*)",
       "Bash(brew uninstall:*)",
       "Bash(rclone:*)",
       "Bash(~/claude-computer/bin/archive-push:*)",
@@ -162,7 +161,6 @@
       "Bash(tail ~/.config/sops/*)",
       "Read(~/.config/sops/**)",
       "Edit(~/.config/sops/**)",
-      "Write(~/.config/sops/**)",
       "Read(~/Library/Application Support/sops/**)"
     ]
   },
@@ -208,6 +206,22 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/rm-guard.py",
+            "timeout": 10
+          }
+        ]
+      }
     ]
+  },
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true
   }
 }

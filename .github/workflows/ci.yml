@@ -107,6 +107,10 @@ jobs:
       - name: dashboard matrix
         run: ./tests/dashboard.sh
 
+      # The rm-guard hook: rm without a prompt only inside temporary folders; every other rm asks.
+      - name: rm-guard hook
+        run: ./tests/rm-guard.sh
+
       # setup-tools.sh --only vscode and --only agent-reach; `code`, `uv` and `npm` are stubs,
       # so nothing is ever installed.
       - name: setup-tools.sh dry-run and failure matrix
