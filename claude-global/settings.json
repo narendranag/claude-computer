@@ -208,18 +208,6 @@
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/rm-guard.py",
-            "timeout": 10
-          }
-        ]
-      }
     ]
   },
   "enabledPlugins": {
