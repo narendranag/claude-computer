@@ -14,6 +14,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 - **`rm` in temporary folders no longer prompts.** A PreToolUse hook, `claude-global/hooks/rm-guard.py`, replaces the `Bash(rm:*)` ask rule. It allows a plain `rm` whose targets are all literal absolute paths strictly inside `/tmp` or `$TMPDIR` (after resolving symlinks, with no `..`), and returns "ask" for every other `rm`: compound commands, variables, globs, `~`, `sudo`, `xargs`, relative paths, and the temporary folder itself. It fails closed. `tests/rm-guard.sh` runs in CI.
 
+### Fixed
+
+- **`transcripts-sync` exports every MacParakeet transcript once.** MacParakeet stores ids as 16-byte UUID blobs; the script wrote Python's `b'...'` representation into notes and crashed saving its cursor after the first note, so one transcript was re-exported every run and the rest never were. Ids are now UUID text, the cursor compares by hex, notes written with the old `b'...'` ids are still recognised, and a crash prints one line instead of a traceback.
+
 ## [0.5.0] — 2026-10-04
 
 Bitwarden leaves; machine secrets move into one sops + age file in your private instance, read by the wrappers and never by Claude. A plaintext dotenv file moves in with one command, and projects get their secrets through `secrets exec`. And the terminal changes: every Ghostty window opens into one herdr session that tracks each agent — working, blocked, done or idle — under a powerlevel10k-style prompt.
