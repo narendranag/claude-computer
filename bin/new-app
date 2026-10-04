@@ -83,6 +83,18 @@ if [ "$dry" -eq 0 ]; then
   [ "$fail" -eq 0 ] || cc_die "$EX_FAIL" "could not substitute the project name in $dir"
 fi
 
+# Every project documents itself the same way (docs/DEV-GUIDELINES.md, "Documentation").
+step "docs/ from templates/docs (docs-build --init)"
+if [ "$dry" -eq 0 ]; then
+  if [ -e "$dir/docs" ]; then
+    cc_info "  docs/ already exists; left as it is"
+  elif command -v uv >/dev/null && command -v pandoc >/dev/null; then
+    "$CC_ROOT/bin/docs-build" --init "$dir/docs" --title "$name" >/dev/null || cc_die "$EX_FAIL" "docs-build --init failed in $dir/docs"
+  else
+    cc_info "  skipped: docs-build needs uv and pandoc; later, run: docs-build --init docs --title $name"
+  fi
+fi
+
 # A client folder is its own repo; a code repo inside it is a separate repo, so the client's
 # repo must not track it.
 if [ -d "$parent/.git" ]; then

@@ -6,6 +6,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- **A documentation standard, and `bin/docs-build` to keep it.** Project docs are Markdown with YAML front matter in `docs/` (`README.md` as the index, `NN-name.md` per topic, an `AGENTS.md` of conventions). `docs-build` validates them (front matter, `depends_on`/`related`, every link and `#anchor`, stale `<!-- include: -->` blocks) and generates `llms.txt`, `data/manifest.json`, `data/glossary.json` and `index.html`: every document in one offline page with search, contents, dark mode and print styles (`lib/docs/page.html`, `lib/docs/style.css`). A project adds its own checks, data files and sidebar text in `docs/docs_ext.py`. `--check` validates only; `--init` starts `docs/` from `templates/docs/`; `--vendor` writes a self-contained `docs/build.py` for repos built without the template; `--view` renders any Markdown tree, front matter or not, into the same page for reading. `docs/DEV-GUIDELINES.md` gains a "Documentation" section; `claude-global/CLAUDE.md` gains the rule. `tests/docs-build.sh` runs in CI.
+- `new-app` starts `docs/` in every new project and each template's `just lint` runs `docs-build --check docs`; `new-client` starts `docs/` with a vendored `build.py`. Both skip the step, and say how to run it later, when uv or pandoc is missing.
+- The session-start hook rebuilds a reading copy of the brain's own Markdown at `~/claude-computer/.docs-view/index.html` in the background. `.docs-view/` is in `dotfiles/gitignore_global`; `docs-build` is allowed in `settings.json`.
+
 ## [0.5.0] — 2026-10-04
 
 Bitwarden leaves; machine secrets move into one sops + age file in your private instance, read by the wrappers and never by Claude. A plaintext dotenv file moves in with one command, and projects get their secrets through `secrets exec`. And the terminal changes: every Ghostty window opens into one herdr session that tracks each agent — working, blocked, done or idle — under a powerlevel10k-style prompt.

@@ -102,6 +102,11 @@ jobs:
       - name: secrets matrix
         run: ./tests/secrets.sh
 
+      # docs-build renders with pandoc and runs under uv.
+      - uses: astral-sh/setup-uv@v5
+      - name: docs-build matrix
+        run: sudo apt-get install -y -qq pandoc && ./tests/docs-build.sh
+
       # setup-tools.sh --only vscode and --only agent-reach; `code`, `uv` and `npm` are stubs,
       # so nothing is ever installed.
       - name: setup-tools.sh dry-run and failure matrix
