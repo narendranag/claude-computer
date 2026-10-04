@@ -191,8 +191,8 @@ case_new "--view: any Markdown, links between files, --exclude, one output"
 R="$CASE/repo"
 mkdir -p "$R/docs/machines" "$R/templates/x" "$R/.hidden"
 printf '# The repo\n\nTop-level readme. See [the fleet](docs/FLEET.md#rules).\n' > "$R/README.md"
-printf '# Fleet\n\nEvery machine.\n\n## Rules\n\nRead [air](machines/air.md) and [a script](../bin/tool).\n' > "$R/docs/FLEET.md"
-printf -- '---\nage_recipient: age1xyz\n---\n\n# air\n\nThe laptop.\n' > "$R/docs/machines/air.md"
+printf '# Fleet\n\nEvery machine.\n\n## Rules\n\nRead [example-laptop](machines/example-laptop.md) and [a script](../bin/tool).\n' > "$R/docs/FLEET.md"
+printf -- '---\nage_recipient: age1xyz\n---\n\n# example-laptop\n\nThe laptop.\n' > "$R/docs/machines/example-laptop.md"
 printf '# Template\n' > "$R/templates/x/README.md"
 printf '# Hidden\n' > "$R/.hidden/x.md"
 before="$(listing "$R")"
@@ -202,7 +202,7 @@ V="$R/.docs-view/index.html"
 exists "$V"
 contains "$OUT" "(3 documents)"
 contains "$V" '<section class="doc" id="docs-fleet"'
-contains "$V" 'href="#docs-machines-air"'
+contains "$V" 'href="#docs-machines-example-laptop"'
 contains "$V" 'href="#docs-fleet-rules"'
 contains "$V" 'href="../bin/tool"'
 contains "$V" '<p class="side-title">docs/machines/</p>'
