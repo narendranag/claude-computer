@@ -322,6 +322,7 @@ vault/
 | Reading digest           | 06:00               | `feeds-sync`                                                           |
 | Fleet drift              | daily               | `map-check` → `tg-send` on drift                                       |
 | Weekly review            | weekly              | `/review` — empties `## Unassigned` first                              |
+| Site goes live           | per domain          | `https-check <domain>` (`--fix` on Cloudflare); `/graduate`, `/review` |
 | Archive / retrieve       | ad hoc              | `/archive`, `/retrieve` → `archive-push`, `archive-pull`               |
 | Camera card              | when a card goes in | `camera-ingest`                                                        |
 | Books / comics cold copy | weekly              | `library-push`                                                         |

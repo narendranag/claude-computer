@@ -8,6 +8,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- **`bin/https-check`: every public domain redirects http to https.** It fails a domain whose `http://` doesn't answer 301/308 to `https://`, and `--fix` turns on Cloudflare "Always Use HTTPS" for th [... omitted end of long line]
+- **`gmail attachments <id>`** lists a message's attachments, and `--save DIR` writes them there — by file name only, never a path from the sender, and never over an existing file.
 - **`secrets unset <name.field>`** removes one value, and its name once no field is left. It asks on a terminal and needs `--yes` without one; exit 5 if the value isn't set. Renaming a secret no longer needs a raw `sops unset`.
 - **Progress dashboards for long tasks.** `bin/dashboard` keeps a live page at `.dashboard/index.html` in the project: tasks (pending, in progress, done, blocked, cancelled), questions waiting for you with each proposed default and whether it was applied, the latest deliverables with links, current blockers, the last real update and a separate live clock. One self-contained file — it opens with a double-click, works offline and reloads every 10 seconds; `dashboard snapshot` makes a copy labelled as one, for attaching. Subcommands: `style` (light, dark or auto, which follows the system), `init`, `task`, `question`, `deliverable`, `blocker`, `remove`, `open`, `render`, `redesign`, `snapshot`, `show`, `path`. It writes only to `.dashboard/` and `~/.config/claude-dashboard/style.json`.
 - **`gcal` covers every calendar.** `gcal calendars` lists them; `gcal list` (now across all calendars shown in Google Calendar, labelled), `gcal today` and `gcal search "query"` (a year back and ahead); `--calendar` takes a name or an id. One new read-only scope, `calendar.calendarlist.readonly`; the next run asks for consent again.
@@ -40,6 +42,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- **`rm` asks again.** Unwiring the rm-guard hook left `rm` with no rule at all, since the hook had replaced the `Bash(rm:*)` ask rule. The rule is back in `claude-global/settings.json`, so every `rm` prompts, as the README and `docs/TEMPLATE-DECISIONS.md` say; opting into the hook means removing it.
 - **`dotfiles/zshenv` exports `SOPS_AGE_KEY_FILE`**, so a plain `sops` in a terminal finds the age key; macOS's default would be `~/Library/Application Support/sops/`.
 - **A slow GitHub API no longer hangs `secrets`.** The visibility check before a push (`gh repo view`) gives up after 15 seconds (`cc_timeout`: `timeout`, `gtimeout` or perl's alarm), and the change is committed locally, not pushed, with a message saying so.
 - **Dashboard layouts can no longer stack the status badge on the time.** The designer's guidance lists each item's parts in order, and a `+` selector joining two parts that are never neighbours (`.dash-badge + .dash-time`) is rejected before use.

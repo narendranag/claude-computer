@@ -76,6 +76,7 @@
     ],
     "ask": [
       "Bash(git push:*)",
+      "Bash(rm:*)",
       "Bash(brew uninstall:*)",
       "Bash(rclone:*)",
       "Bash(~/claude-computer/bin/archive-push:*)",
