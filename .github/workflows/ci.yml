@@ -147,6 +147,8 @@ jobs:
           # A typo in a permission rule fails open, so check the shape too.
           jq -e '.permissions.deny | type == "array" and length > 0' claude-global/settings.json > /dev/null
           jq -e '.permissions.defaultMode == "auto"' claude-global/settings.json > /dev/null
+          # Every rm asks unless the owner opts into the rm-guard hook (docs/TEMPLATE-DECISIONS.md).
+          jq -e '.permissions.ask | index("Bash(rm:*)")' claude-global/settings.json > /dev/null
           # Claude never decrypts: the secret-reading commands must be denied, the ones that run or
           # change something with secrets asked, and none of either may be allowed outright.
           jq -e '.permissions as $p
