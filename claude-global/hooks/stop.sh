@@ -40,7 +40,9 @@ if [ -d "$ROOT/.git" ] && [ ! -f "$ROOT/.template" ] && [ -n "$(git -C "$ROOT" s
   git -C "$ROOT" add -- $paths 2>/dev/null
   if out="$(git -C "$ROOT" commit -q -m "[$host] update $files" -- $paths 2>&1)"; then
     # Machine files are private: never push them to a public repository.
-    vis="$(cd "$ROOT" && to 15 gh repo view --json visibility --jq .visibility 2>/dev/null)"
+    # Ask about origin by URL: with no argument, gh reports the `upstream` remote (the public
+    # template) whenever one exists, and every push would be refused.
+    vis="$(to 15 gh repo view "$(git -C "$ROOT" remote get-url origin)" --json visibility --jq .visibility 2>/dev/null)"
     if [ "$vis" = "PUBLIC" ]; then
       echo "claude-computer: committed locally but NOT pushed — origin is a public repo" >&2
     else

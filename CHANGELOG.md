@@ -42,6 +42,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- **The Stop hook pushes `docs/` again in an instance with an `upstream` remote.** It asked a bare `gh repo view` whether the repo was public, and gh answers for the `upstream` remote when one exists — the public template — so every `docs/` change was committed but never pushed. It now names `origin` by URL; `/setup`'s privacy check does the same.
 - **`rm` asks again.** Unwiring the rm-guard hook left `rm` with no rule at all, since the hook had replaced the `Bash(rm:*)` ask rule. The rule is back in `claude-global/settings.json`, so every `rm` prompts, as the README and `docs/TEMPLATE-DECISIONS.md` say; opting into the hook means removing it.
 - **`dotfiles/zshenv` exports `SOPS_AGE_KEY_FILE`**, so a plain `sops` in a terminal finds the age key; macOS's default would be `~/Library/Application Support/sops/`.
 - **A slow GitHub API no longer hangs `secrets`.** The visibility check before a push (`gh repo view`) gives up after 15 seconds (`cc_timeout`: `timeout`, `gtimeout` or perl's alarm), and the change is committed locally, not pushed, with a message saying so.
