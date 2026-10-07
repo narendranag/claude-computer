@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# https-check — does a public site send http:// to https://? Every public domain must.
+#
+# Usage:
+#   https-check <domain>... [--fix] [--token ENV_NAME]
+#
+#   <domain>    a hostname (example.com, www.example.com); no scheme
+#   --fix       turn on Cloudflare "Always Use HTTPS" for each failing domain's zone, then re-check
+#   --token     the secret holding a Cloudflare API token with Zone Settings: Edit on the zone,
+#               named as its environment variable (default CLOUDFLARE_API_TOKEN, which the store
+#               keeps as env.cloudflare_api_token)
+#
+# A domain passes when http:// answers 301 or 308 with a Location on https://, and https://
+# answers below 400. HSTS is reported, never set: it is hard to undo once browsers cache it.
+# Hostnames that don't resolve are skipped (reported, not failed).
+#
+# Secret: only with --fix — the token above, in the secrets store (docs/SECRETS.md).
+# Exit codes: 0 all pass · 1 a domain fails or the API call failed · 2 usage · 3 curl/jq/sops missing ·
+#             4 no key / not admitted · 5 secret not set
+set -euo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+cc_wants_help "$@"
+cc_need curl jq
+
+fix=0; token_env=CLOUDFLARE_API_TOKEN; domains=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fix) fix=1; shift ;;
+    --token) token_env="${2:?}"; shift 2 ;;
+    -*) cc_usage >&2; exit "$EX_USAGE" ;;
+    *) domains+=("${1#*://}"); shift ;;
+  esac
+done
+[ "${#domains[@]}" -gt 0 ] || { cc_usage >&2; exit "$EX_USAGE"; }
+
+# check <domain> — prints one line; returns 0 pass, 1 fail, 2 does not resolve
+check() {
+  local d="$1" out code loc https hsts
+  if ! out="$(curl -sS -o /dev/null --max-time 20 -w '%{http_code} %{redirect_url}' "http://$d/" 2>&1)"; then
+    case "$out" in *"Could not resolve"*) printf 'skip  %s — does not resolve\n' "$d"; return 2 ;; esac
+    printf 'FAIL  %s — http:// error: %s\n' "$d" "$out"; return 1
+  fi
+  code="${out%% *}"; loc="${out#* }"
+  https="$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "https://$d/" 2>/dev/null || echo 000)"
+  hsts="$(curl -sSI --max-time 20 "https://$d/" 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower($1)=="strict-transport-security"{print $2}')"
+  if [ "$https" = 000 ] || [ "$https" -ge 400 ]; then
+    printf 'FAIL  %s — https:// answers %s\n' "$d" "$https"; return 1
+  fi
+  case "$code:$loc" in
+    301:https://* | 308:https://*)
+      printf 'ok    %s — http %s → %s; https %s; HSTS %s\n' "$d" "$code" "$loc" "$https" "${hsts:-none}"; return 0 ;;
+  esac
+  printf 'FAIL  %s — http:// answers %s%s instead of redirecting to https://\n' "$d" "$code" "${loc:+ → $loc}"
+  return 1
+}
+
+# zone_id <domain> — the Cloudflare zone holding it: the name itself, then each parent
+zone_id() {
+  local name="$1" id
+  while :; do
+    id="$(cc_curl "Authorization: Bearer $token" "https://api.cloudflare.com/client/v4/zones?name=$name" \
+      | jq -r '.result[0].id // empty')" || return 1
+    [ -n "$id" ] && { printf '%s\n' "$id"; return 0; }
+    case "$name" in *.*.*) name="${name#*.}" ;; *) return 1 ;; esac
+  done
+}
+
+token=""
+failed=0
+for d in "${domains[@]}"; do
+  rc=0; check "$d" || rc=$?
+  [ "$rc" -eq 1 ] || continue
+  if [ "$fix" -eq 0 ]; then failed=1; continue; fi
+  if [ -z "$token" ]; then
+    path="$(cc_env_path "$token_env")"
+    token="$(cc_secret "${path%%.*}" "${path#*.}")"
+  fi
+  zid="$(zone_id "$d")" || { cc_err "$d: no Cloudflare zone this token can see"; failed=1; continue; }
+  resp="$(cc_curl "Authorization: Bearer $token" -X PATCH -H 'Content-Type: application/json' \
+    -d '{"value":"on"}' "https://api.cloudflare.com/client/v4/zones/$zid/settings/always_use_https")" \
+    || { cc_err "$d: API error: $resp"; failed=1; continue; }
+  printf 'fixed %s — Always Use HTTPS on for its zone; re-checking\n' "$d"
+  ok=0
+  for _ in 1 2 3 4 5 6; do
+    sleep 5
+    if check "$d" >/dev/null; then ok=1; break; fi
+  done
+  check "$d" || true
+  [ "$ok" -eq 1 ] || failed=1
+done
+exit "$failed"

@@ -8,6 +8,9 @@
 Usage:
   gmail search "query" [-n N] [--json]    Gmail search syntax, e.g. 'from:newsletter@x.com newer_than:1d'
   gmail get <message-id> [--html]         one message as markdown-ish text (headers + body)
+  gmail attachments <message-id> [--save DIR]
+                                          list a message's attachments; --save writes them into DIR
+                                          (by file name only, never overwriting)
   gmail labels                            list labels
   gmail draft --to A[,B] --subject S (--body TEXT | --body-file PATH|-) [--cc X] [--bcc X] [--reply ID]
                                           save a draft; prints its id (nothing is sent)
@@ -49,6 +52,16 @@ def body(part: dict, want: str) -> str:
         if found:
             return found
     return ""
+
+
+def attachments(part: dict) -> list[dict]:
+    """Every part with a filename, depth first: {filename, mimeType, size, attachmentId or inline data}."""
+    out = []
+    if part.get("filename"):
+        out.append({"filename": part["filename"], "mimeType": part.get("mimeType", ""), **part.get("body", {})})
+    for p in part.get("parts", []) or []:
+        out.extend(attachments(p))
+    return out
 
 
 def strip_html(s: str) -> str:
@@ -111,6 +124,9 @@ def main() -> int:
     g = sub.add_parser("get", add_help=False)
     g.add_argument("id")
     g.add_argument("--html", action="store_true")
+    at = sub.add_parser("attachments", add_help=False)
+    at.add_argument("id")
+    at.add_argument("--save")
     sub.add_parser("labels", add_help=False)
     for name in ("draft", "send"):
         c = sub.add_parser(name, add_help=False)
@@ -142,6 +158,27 @@ def main() -> int:
             print(f"- {l['name']} ({l['id']})")
         return 0
 
+    if a.cmd == "attachments":
+        msg = svc.messages().get(userId="me", id=a.id, format="full").execute()
+        found = attachments(msg["payload"])
+        if not found:
+            print("no attachments")
+            return 0
+        dest = Path(a.save).expanduser() if a.save else None
+        if dest:
+            dest.mkdir(parents=True, exist_ok=True)
+        for f in found:
+            line = f"- {f['filename']} ({f['mimeType']}, {f.get('size', 0) / 1024:.0f} KB)"
+            if dest:
+                data = f.get("data") or svc.messages().attachments().get(
+                    userId="me", messageId=a.id, id=f["attachmentId"]).execute()["data"]
+                path = dest / Path(f["filename"]).name  # never a path from the sender
+                if path.exists():
+                    raise cc.CCError(cc.EX_USAGE, f"{path} already exists; not overwritten")
+                path.write_bytes(base64.urlsafe_b64decode(data))
+                line += f" → {path}"
+            print(line)
+        return 0
     if a.cmd == "send" and a.draft:
         sent = svc.drafts().send(userId="me", body={"id": a.draft}).execute()
         print(f"sent {sent['id']} (thread {sent['threadId']})")
