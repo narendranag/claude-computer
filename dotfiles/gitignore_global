@@ -12,3 +12,6 @@
 .dashboard/
 # docs-build --view — a local reading copy, regenerated
 .docs-view/
+
+# Claude Code per-project permissions: this machine only, never shared
+**/.claude/settings.local.json

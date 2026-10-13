@@ -136,6 +136,8 @@ if want autoupdate; then
     run brew tap domt4/autoupdate
     # Current Homebrew asks you to trust third-party tap commands before they run.
     if brew help trust >/dev/null 2>&1; then run brew trust --command domt4/autoupdate/autoupdate || fail=1; fi
+    # A freshly erased Mac has no ~/Library/LaunchAgents, and autoupdate won't create it.
+    run mkdir -p "$HOME/Library/LaunchAgents"
     run brew autoupdate start 86400 --upgrade --cleanup || fail=1
   fi
 fi
