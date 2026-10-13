@@ -5,7 +5,7 @@
 #   vault-setup [--vault DIR] [--upgrade] [--create-remote] [--dry-run]
 #
 #   --vault DIR       where the vault lives (default $CC_VAULT, else ~/vault)
-#   --upgrade         re-fetch the plugins even if they are already installed
+#   --upgrade         re-fetch the plugins and the theme at their latest release
 #   --create-remote   also `gh repo create <name> --private --source … --push`
 #                     Never implicit: it publishes your notes to GitHub. Refuses if a repo of
 #                     that name already exists and is public.
@@ -24,6 +24,12 @@
 #      and version is printed as it is fetched and recorded in
 #      <vault>/.obsidian/plugins/VERSIONS.md. Read the registry entry and the repo before you
 #      trust them; nothing is installed that is not named here.
+#      A plugin is installed when its code (main.js) is there, not just its manifest: the vault
+#      commits manifest.json and data.json but ignores the code, so a fresh clone has manifests
+#      only. Every id in community-plugins.json with a committed manifest gets its code back at
+#      the manifest's version (the release tagged <v> or v<v>); the committed manifest.json and
+#      data.json are never replaced. The theme named in appearance.json (`cssTheme`) is fetched
+#      from Obsidian's theme registry at its latest release when its theme.css is missing.
 #   3. the config — `.obsidian/community-plugins.json` gains the three ids (merged, never
 #      replaced). Defaults for Templater, daily notes, new-note location and Obsidian Git are
 #      written only when the file does not exist yet, so your own settings always win.
@@ -41,6 +47,7 @@ cc_wants_help "$@"
 REGISTRY="${CC_OBSIDIAN_REGISTRY:-https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json}"
 GITHUB_API="${CC_GITHUB_API:-https://api.github.com}"
 GITHUB_DL="${CC_GITHUB_DL:-https://github.com}"
+THEMES="${CC_OBSIDIAN_THEMES:-https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-css-themes.json}"
 PLUGINS="obsidian-git dataview templater-obsidian"
 
 vault="${CC_VAULT:-$HOME/vault}"
@@ -171,6 +178,21 @@ latest_tag() {
   printf '%s' "$json" | jq -r '.tag_name // empty' 2>/dev/null || true
 }
 
+# The release for a pinned version: tagged <v>, or v<v>; empty when neither exists.
+release_tag() {
+  local repo="$1" v="$2" t json
+  for t in "$v" "v$v"; do
+    json=""
+    if [ "$gh_api_ok" -eq 1 ]; then json="$(gh api "repos/$repo/releases/tags/$t" 2>/dev/null || true)"; fi
+    if [ -z "$json" ]; then
+      json="$(curl -fsSL --max-time "${CC_HTTP_TIMEOUT:-60}" "$GITHUB_API/repos/$repo/releases/tags/$t" 2>/dev/null || true)"
+    fi
+    json="$(printf '%s' "$json" | jq -r '.tag_name // empty' 2>/dev/null || true)"
+    [ -n "$json" ] && { printf '%s' "$json"; return 0; }
+  done
+  return 0
+}
+
 installed_version() {
   [ -f "$1/manifest.json" ] || return 1
   jq -r '.version // "?"' "$1/manifest.json" 2>/dev/null
@@ -180,16 +202,29 @@ install_plugin() {
   local id="$1" dir repo tag base tmp have mid f
   dir="$vault/.obsidian/plugins/$id"
 
+  local pin=""
   if have="$(installed_version "$dir")" && [ "$upgrade" -eq 0 ]; then
-    say "$id $have — already installed (--upgrade re-fetches)"
-    return 0
+    if [ -f "$dir/main.js" ]; then
+      say "$id $have — already installed (--upgrade re-fetches)"
+      return 0
+    fi
+    pin="$have"   # a committed manifest without its code: restore that version
   fi
 
   repo="$(plugin_repo "$id")"
-  tag="$(latest_tag "$repo")"
+  tag=""
+  if [ -n "$pin" ]; then
+    tag="$(release_tag "$repo" "$pin")"
+    [ -n "$tag" ] || say "$id: no release tagged $pin or v$pin in $repo — taking the latest"
+  fi
+  [ -n "$tag" ] || tag="$(latest_tag "$repo")"
   [ -n "$tag" ] || cc_die "$EX_FAIL" "no latest release for $repo (rate-limited? \`gh auth login\` raises the limit)"
   base="$GITHUB_DL/$repo/releases/download/$tag"
-  say "$id $tag ← $base/{main.js,manifest.json,styles.css}"
+  if [ -n "$pin" ]; then
+    say "$id $tag ← $base/{main.js,styles.css} (code for the committed manifest, $pin)"
+  else
+    say "$id $tag ← $base/{main.js,manifest.json,styles.css}"
+  fi
 
   if [ "$dry" -eq 1 ]; then
     say "  third-party code — a dry run downloads nothing"
@@ -217,14 +252,69 @@ install_plugin() {
   jq -n --arg repo "$repo" --arg tag "$tag" --arg url "$base" --arg on "$(date -u +%Y-%m-%d)" \
     '{repo: $repo, tag: $tag, url: $url, fetched: $on}' > "$tmp/.source.json"
 
-  mkdir -p "$vault/.obsidian/plugins"
-  rm -rf "$dir"
-  mv "$tmp" "$dir"
+  # Into the plugin's folder, file by file: data.json (its settings) is never touched, and a
+  # pinned restore keeps the committed manifest.json as it is.
+  [ -n "$pin" ] && rm -f "$tmp/manifest.json"
+  mkdir -p "$dir"
+  [ -f "$tmp/styles.css" ] || rm -f "$dir/styles.css"
+  for f in "$tmp"/* "$tmp/.source.json"; do mv -f "$f" "$dir/"; done
+  rm -rf "$tmp"
   say "  installed $id $(installed_version "$dir") from $repo $tag"
 }
 
 step "plugins → $vault/.obsidian/plugins — third-party code Obsidian runs; registry: $REGISTRY"
-for p in $PLUGINS; do install_plugin "$p"; done
+# The three above, then every other enabled plugin the vault has pinned with a committed manifest.
+ALL_PLUGINS="$PLUGINS"
+if [ -f "$vault/.obsidian/community-plugins.json" ]; then
+  for p in $(jq -r '.[]?' "$vault/.obsidian/community-plugins.json" 2>/dev/null || true); do
+    case " $ALL_PLUGINS " in *" $p "*) continue ;; esac
+    [ -f "$vault/.obsidian/plugins/$p/manifest.json" ] && ALL_PLUGINS="$ALL_PLUGINS $p"
+  done
+fi
+for p in $ALL_PLUGINS; do install_plugin "$p"; done
+
+# The theme appearance.json names. Themes are CSS, not code, but they come from a third-party
+# repo too: looked up by name in Obsidian's theme registry, files from its latest release.
+install_theme() {
+  local name dir repo tag base tmp themes f mname
+  name="$(jq -r '.cssTheme // empty' "$vault/.obsidian/appearance.json" 2>/dev/null || true)"
+  [ -n "$name" ] || return 0
+  dir="$vault/.obsidian/themes/$name"
+  if [ -f "$dir/theme.css" ] && [ "$upgrade" -eq 0 ]; then
+    say "theme $name — already installed (--upgrade re-fetches)"
+    return 0
+  fi
+  mkdir -p "$WORK"
+  themes="$WORK/community-css-themes.json"
+  curl -fsSL --max-time "${CC_HTTP_TIMEOUT:-60}" "$THEMES" -o "$themes" ||
+    cc_die "$EX_FAIL" "could not read Obsidian's theme registry: $THEMES"
+  repo="$(jq -r --arg n "$name" '.[]? | select(.name == $n) | .repo' "$themes" 2>/dev/null | head -1)"
+  if [ -z "$repo" ] || [ "$repo" = null ]; then
+    say "theme $name is not in the theme registry — skipped"
+    return 0
+  fi
+  tag="$(latest_tag "$repo")"
+  [ -n "$tag" ] || cc_die "$EX_FAIL" "no latest release for theme $name ($repo)"
+  base="$GITHUB_DL/$repo/releases/download/$tag"
+  say "theme $name $tag ← $base/{theme.css,manifest.json}"
+  if [ "$dry" -eq 1 ]; then
+    say "  a dry run downloads nothing"
+    return 0
+  fi
+  tmp="$WORK/theme"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  for f in theme.css manifest.json; do
+    curl -fsSL --max-time "${CC_HTTP_TIMEOUT:-60}" "$base/$f" -o "$tmp/$f" ||
+      cc_die "$EX_FAIL" "could not download $base/$f — theme not installed"
+  done
+  mname="$(jq -r '.name // empty' "$tmp/manifest.json" 2>/dev/null || true)"
+  [ "$mname" = "$name" ] ||
+    cc_die "$EX_FAIL" "theme $name: the manifest at $base says '$mname' — refusing to install it"
+  mkdir -p "$dir"
+  mv -f "$tmp/theme.css" "$tmp/manifest.json" "$dir/"
+  say "  installed theme $name $tag from $repo"
+}
+install_theme
 
 # What is running in this vault and where it came from, regenerated from the files on disk.
 write_versions() {
@@ -243,7 +333,7 @@ write_versions() {
     echo
     echo "| Plugin | Version | Repo | Release | Fetched |"
     echo "| ------ | ------- | ---- | ------- | ------- |"
-    for id in $PLUGINS; do
+    for id in $ALL_PLUGINS; do
       dir="$vault/.obsidian/plugins/$id"
       if [ -f "$dir/manifest.json" ]; then
         src="$dir/.source.json"
