@@ -11,3 +11,5 @@ The client: $ARGUMENTS
 4. **Write the brain**, replacing the template stub: `CLAUDE.md` (who, the engagement, contacts by name and role only, where things are), and a first `## Now` in `TASKS.md`.
 5. If there is code to build for them: `~/claude-computer/bin/new-app <type> <name> --dir ~/clients/<client>` — it becomes its own repo and the client repo ignores it.
 6. Run `~/claude-computer/bin/tasks-sync`, commit, push, and tell me the path and the repo URL.
+
+**Set up, then stop.** This session builds the skeleton only: the folder, the repo, `brief/`, and the brain above. Plans, research, target lists, drafts and code are the client brain's work, done in a session started in it (`cd ~/clients/<client> && claude`). Write them into `## Now` instead of doing them here.

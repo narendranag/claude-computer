@@ -601,8 +601,12 @@ fi
 
 DO_BREW=0
 BREW_BIN=""
+# Whether the shell that started this script has brew on its PATH. This script puts brew on its
+# own PATH, but cannot change its parent's: without it, `claude` is not found there afterwards.
+BREW_IN_SHELL=0
+command -v brew >/dev/null 2>&1 && BREW_IN_SHELL=1
 if BREW_BIN="$(find_brew)"; then
-  if command -v brew >/dev/null 2>&1; then
+  if [ "$BREW_IN_SHELL" -eq 1 ]; then
     have "Homebrew ($BREW_BIN)"
   else
     have "Homebrew ($BREW_BIN) — installed but not on your PATH; this run will fix that"
@@ -1088,7 +1092,12 @@ else
 fi
 
 say ""
-say "  1. ${C_B}cd $DISPLAY_DIR && claude${C_0}"
+if [ "$BREW_IN_SHELL" -eq 1 ]; then
+  say "  1. ${C_B}cd $DISPLAY_DIR && claude${C_0}"
+else
+  say "  1. Open a new terminal window (or run ${C_B}exec zsh -l${C_0}), then ${C_B}cd $DISPLAY_DIR && claude${C_0}."
+  say "     This window started before Homebrew was on its PATH, so it cannot find ${C_B}claude${C_0} yet."
+fi
 say "  2. Log in to Claude Code, then check the status line reads ${C_B}⏵⏵ auto mode on${C_0}."
 say "     Shift+Tab cycles the modes. Never ${C_B}bypass permissions${C_0}."
 say "  3. Paste the first prompt and let it go."
