@@ -2,16 +2,17 @@
 type: project
 created: <% tp.date.now("YYYY-MM-DD") %>
 status: active
-project: <% tp.file.title %>
-tags: []
+repo: <owner/repo>
 ---
-
 # <% tp.file.title %>
 
-**Repo:** `~/projects/<% tp.file.title %>`
-**What:** one sentence
+<What it is, in 2–5 lines.>
 
-<!-- tasks-sync:start — generated, edit the brain's TASKS.md instead -->
-<!-- tasks-sync:end -->
+## What it was
 
-## Notes
+## Outcome
+
+## Lessons
+
+## Log
+- <% tp.date.now("YYYY-MM-DD") %> — <what happened>. ([[<source>]])

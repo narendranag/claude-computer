@@ -14,6 +14,8 @@
 #   feeds-sync       daily 06:00      reading digest
 #   daily-note       daily 06:30      draft today's note with `claude -p`, unattended: the vault is
 #                                     the working directory and --allowedTools is read/edit + git commit
+#   vault-nightly    daily 04:30      transcripts + inbox into the vault's memory graph with `claude -p`, in a
+#                                     worktree, landed only past the vault-lint gate (bin/vault-nightly)
 #   map-check        daily 09:00      drift report → tg-send only when there is drift
 #   transcripts-sync on db change     MacParakeet transcriptions → vault/inbox/transcripts (WatchPaths)
 #   library-push     weekly           cold copy of ~/library/books, comics (Calibre) to R2
@@ -28,7 +30,7 @@ cc_is_macos || cc_die "$EX_DEPS" "launchd is macOS-only; on Linux use a systemd 
 AGENTS="$HOME/Library/LaunchAgents"
 LOGS="$HOME/Library/Logs/claude-computer"
 PREFIX="local.claude-computer"
-JOBS="tasks-sync capture resources-sync feeds-sync daily-note map-check transcripts-sync library-push"
+JOBS="tasks-sync capture resources-sync feeds-sync daily-note vault-nightly map-check transcripts-sync library-push"
 
 # The job list lives twice — the table in the header above, which `--help` prints, and JOBS.
 # Two copies drift, so `list` diffs them and fails instead of quietly telling you half the truth.
@@ -54,7 +56,10 @@ job_def() {
     # edit), and --allowedTools is the shortest list that can draft and commit a note.
     # Anything not listed — every other Bash command, WebFetch, Task — is refused
     # outright, and there is no terminal to approve it.
-    daily-note)     echo "daily:06:30|cd \$HOME/vault && claude -p 'Draft the daily note for today, per /today steps 1-2 only. Edit only files under ~/vault. Commit the vault.' --permission-mode auto --allowedTools 'Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git add:*),Bash(git commit:*)'" ;;
+    daily-note)     echo "daily:06:30|cd \$HOME/vault && claude -p 'Draft the daily note for today, per /today steps 1-2 only. If it exists, keep its ## Overnight section exactly as it is. Edit only files under ~/vault. Commit the vault.' --permission-mode auto --allowedTools 'Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git add:*),Bash(git commit:*)'" ;;
+    # The other unattended Claude: bin/vault-nightly fences it itself (a worktree, dontAsk, its own
+    # --allowedTools) and lands nothing that fails the vault-lint gate.
+    vault-nightly)  echo "daily:04:30|$b/vault-nightly" ;;
     # A private per-run file, not a fixed /tmp path any other user could pre-create.
     map-check)      echo "daily:09:00|t=\$(mktemp -t cc-map-check) || exit 1; trap 'rm -f \"\$t\"' EXIT; $b/map-check >\"\$t\" 2>&1 || $b/tg-send <\"\$t\"" ;;
     transcripts-sync) echo "watch:$HOME/Library/Application Support/MacParakeet/macparakeet.db|$b/transcripts-sync" ;;

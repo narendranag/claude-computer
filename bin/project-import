@@ -1,0 +1,765 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6.0"]
+# ///
+"""project-import — snapshot GitHub repos into the vault as evidence for project hubs. Never clones.
+
+Every call goes through `gh api` (gh must be authenticated). For each repo it writes one generated note:
+
+  <vault>/sources/repos/<repo>.md
+    front matter  type: source, kind: repo, generated: project-import, created, updated, repo, url,
+                  as_of (default-branch HEAD sha), default_branch, visibility, fork (+ parent, own_commits),
+                  archived, description, created_at, pushed_at, languages (% of bytes, top 6), repo_topics,
+                  size_kb, commits, stars
+    body          ## Activity   first and last commit, commits per month, up to 15 notable commits
+                  ## Tree       two levels, directories first
+                  ## File: …    README, CLAUDE.md, AGENTS.md, DECISIONS.md in full (each capped at 40 KB;
+                                Markdown headings pushed two levels down so they nest under it)
+                  ## Docs       paths under docs/ and any adr/ or decisions/ folder
+
+A re-import of an unchanged repo is a true no-op: `created` is kept, and `updated` moves only when `as_of` does.
+
+Tier (a proposal, printed, for the hub writer to confirm):
+  hub        the vault already has a hub for this repo (an active checkout: tasks-sync made it)
+  skip       none of the owner's commits: a fork, or someone else's code pushed here
+  catalogue  fewer than 10 commits, or neither a README nor a CLAUDE.md
+  hub        everything else
+
+The owner is every identity in --me (repeatable; default: gh's login, `git config user.name`, and the
+`github:` and `git_authors:` lists in the owner's own vault note, memory/people/<git user.name as a
+slug>.md: old GitHub accounts, other git names, emails, and `@domain` for agents that commit for the
+owner), plus each comma-separated entry in $PROJECT_IMPORT_ME. A commit is the owner's when its
+GitHub author or committer login, or its git author or committer name or email, matches one, or its email
+ends with an `@domain` one (case-insensitive).
+`own_commits` counts them in the fetched history (the newest 1,000 at most); when no commit carries any
+author at all, it is unknown and the tier falls back to the size rules.
+
+--catalogue lists every repo of an owner in one GraphQL query per 50 repos (no file contents) and writes
+
+  <vault>/memory/projects/_catalogue.md   generated map, one row per repo, newest push first,
+                                          linked to memory/projects/<repo>.md where a hub exists
+
+  It uses the same tier rules, with the README test made on the root folder's file names. The owner's
+  commits are counted by GitHub account (each --me that is a GitHub login), so commits made under an email
+  no account claims don't count there: run a per-repo import for any `skip` that might matter.
+
+Usage:
+  project-import <owner/repo>... [--vault DIR] [--me ID]... [--dry-run] [--json]
+  project-import --catalogue [--owner NAME] [--vault DIR] [--me ID]... [--dry-run] [--json]
+
+  owner/repo   one or more repos; a bare name means the authenticated user's
+  --vault DIR  vault to write into (default: $CC_VAULT, else ~/vault)
+  --owner      whose repos --catalogue lists (default: the authenticated user)
+  --me ID      a GitHub login or git name that is the owner (repeatable; see Tier)
+  --dry-run    fetch and report; write nothing
+  --json       print the tiers and metadata as JSON instead of one line per repo
+
+Output: one line per repo, `imported <repo> @ <short sha> (<n> commits, <tier>)` ("would import" with
+--dry-run), plus "— unchanged" when the snapshot on disk already matched.
+
+Tests: PROJECT_IMPORT_FIXTURE=<dir> answers every request from recorded JSON instead of gh
+(`{"status": 200, "headers": {...}, "body": ...}` per request, named by the request's slug; a missing file
+is a 404). PROJECT_IMPORT_RECORD=<dir> records real responses in that format.
+
+Exit codes: 0 ok · 1 gh or GitHub failed · 2 usage · 3 gh missing · 5 vault missing
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from collections import Counter
+from pathlib import Path
+from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import cc  # noqa: E402
+
+import yaml  # noqa: E402
+
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$")
+MAX_COMMIT_PAGES = 10  # 1000 most recent commits feed the per-month counts and notable messages
+FILE_CAP = 40 * 1024
+TREE_CAP = 120
+TREE_DIR_CAP = 15  # entries shown inside one top-level folder, so one big folder cannot hide the rest
+DOCS_CAP = 100
+NOTABLE = 15
+KEY_FILES = ("CLAUDE.md", "AGENTS.md", "DECISIONS.md")
+README_RE = re.compile(r"^readme(\.[a-z0-9]+)?$", re.I)
+DOCS_DIR_RE = re.compile(r"(^|/)(adrs?|decisions)(/|$)", re.I)
+NOISE_RE = re.compile(
+    r"^(vault backup|merge\b|merged\b|chore\b|chore[(:]|wip\b|auto[- ]?(commit|sync|save)|\[[\w.-]+\] (tasks|sync)\b|"
+    r"update readme(\.md)?$|initial commit$|first commit$|add files via upload$|\.$|-$)",
+    re.I,
+)
+FIXTURE = os.environ.get("PROJECT_IMPORT_FIXTURE")
+RECORD = os.environ.get("PROJECT_IMPORT_RECORD")
+CATALOGUE_QUERY = """
+query($owner: String!, $cursor: String%MINE_VARS%) {
+  repositoryOwner(login: $owner) {
+    repositories(first: 50, after: $cursor, ownerAffiliations: OWNER, orderBy: {field: PUSHED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        name isFork isArchived visibility description createdAt pushedAt diskUsage stargazerCount
+        primaryLanguage { name }
+        defaultBranchRef { name target { ... on Commit { oid history { totalCount }%MINE% } } }
+        object(expression: "HEAD:") { ... on Tree { entries { name } } }
+      }
+    }
+  }
+}
+"""
+
+
+# ---------------------------------------------------------------- fetch layer
+
+
+class Resp:
+    def __init__(self, status: int, headers: dict[str, str], body: str):
+        self.status, self.headers, self.body = status, headers, body
+
+    def json(self):
+        return json.loads(self.body) if self.body.strip() else None
+
+
+def slug(key: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", key).strip("_")
+
+
+def _fixture(key: str) -> Resp:
+    p = Path(FIXTURE) / f"{slug(key)}.json"
+    if not p.is_file():
+        return Resp(404, {}, '{"message": "Not Found (no fixture %s)"}' % p.name)
+    env = json.loads(p.read_text(encoding="utf-8"))
+    body = env.get("body")
+    return Resp(env.get("status", 200), {k.lower(): v for k, v in env.get("headers", {}).items()},
+                body if isinstance(body, str) else json.dumps(body))
+
+
+def _record(key: str, r: Resp) -> None:
+    d = Path(RECORD)
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        body = json.loads(r.body)
+    except ValueError:
+        body = r.body
+    keep = {k: v for k, v in r.headers.items() if k == "link"}
+    (d / f"{slug(key)}.json").write_text(json.dumps({"status": r.status, "headers": keep, "body": body}, indent=1) + "\n")
+
+
+def gh_get(path: str, raw: bool = False) -> Resp:
+    """GET one REST path through `gh api -i`. Non-2xx comes back as a Resp; only gh itself failing raises."""
+    key = path + ("#raw" if raw else "")
+    if FIXTURE:
+        return _fixture(key)
+    cmd = ["gh", "api", "-i", path]
+    if raw:
+        cmd[3:3] = ["-H", "Accept: application/vnd.github.raw"]
+    p = subprocess.run(cmd, capture_output=True, check=False)
+    out = p.stdout.decode("utf-8", "replace")
+    m = re.match(r"HTTP/[\d.]+ (\d{3})[^\n]*\n(.*?)\r?\n\r?\n", out, re.S)
+    if not m:
+        raise cc.CCError(cc.EX_FAIL, f"gh api {path}: {p.stderr.decode().strip() or 'no response'}")
+    headers = {}
+    for line in m.group(2).splitlines():
+        k, _, v = line.partition(":")
+        headers[k.strip().lower()] = v.strip()
+    r = Resp(int(m.group(1)), headers, out[m.end():])
+    if RECORD:
+        _record(key, r)
+    return r
+
+
+def gh_json(path: str, ok404: bool = False):
+    r = gh_get(path)
+    if r.status == 404 and ok404:
+        return None
+    if not 200 <= r.status < 300:
+        msg = (r.json() or {}).get("message", "") if r.body.strip().startswith("{") else ""
+        raise cc.CCError(cc.EX_FAIL, f"GitHub {r.status} for {path}{': ' + msg if msg else ''}")
+    return r.json()
+
+
+def catalogue_query(ids: list[str], emails: bool = False) -> str:
+    """The catalogue query, with one aliased history count per owner account (mine0, mine1, …), and one for
+    the owner's exact emails (mineE)."""
+    mine = "".join(f" mine{i}: history(author: {{id: $me{i}}}) {{ totalCount }}" for i in range(len(ids)))
+    mine_vars = "".join(f", $me{i}: ID!" for i in range(len(ids)))
+    if emails:
+        mine += " mineE: history(author: {emails: $emails}) { totalCount }"
+        mine_vars += ", $emails: [String!]"
+    q = CATALOGUE_QUERY.replace("%MINE%", mine).replace("%MINE_VARS%", mine_vars)
+    # author-filtered history is slow on GitHub's side: a smaller page keeps each call under its timeout
+    return q.replace("first: 50", "first: 20") if ids or emails else q
+
+
+def gh_graphql(owner: str, cursor: str | None, ids: list[str] = (), emails: list[str] = ()) -> dict:
+    key = f"graphql {owner} {cursor or 'start'}"
+    if FIXTURE:
+        r = _fixture(key)
+    else:
+        cmd = ["gh", "api", "graphql", "-f", f"owner={owner}", "-f", f"query={catalogue_query(list(ids), bool(emails))}"]
+        for i, node_id in enumerate(ids):
+            cmd += ["-f", f"me{i}={node_id}"]
+        for e in emails:
+            cmd += ["-f", f"emails[]={e}"]
+        if cursor:
+            cmd += ["-f", f"cursor={cursor}"]
+        p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if p.returncode != 0:
+            raise cc.CCError(cc.EX_FAIL, f"gh api graphql: {p.stderr.strip()}")
+        r = Resp(200, {}, p.stdout)
+        if RECORD:
+            _record(key, r)
+    if r.status != 200:
+        raise cc.CCError(cc.EX_FAIL, f"GitHub {r.status} for the repository list of {owner}")
+    data = r.json() or {}
+    if data.get("errors") or not (data.get("data") or {}).get("repositoryOwner"):
+        msg = "; ".join(e.get("message", "") for e in data.get("errors", [])) or f"no owner {owner}"
+        raise cc.CCError(cc.EX_FAIL, f"GitHub GraphQL: {msg}")
+    return data["data"]["repositoryOwner"]["repositories"]
+
+
+def whoami() -> str:
+    if FIXTURE:
+        return (gh_json("user") or {}).get("login", "")
+    p = subprocess.run(["gh", "api", "user", "--jq", ".login"], capture_output=True, text=True, check=False)
+    if p.returncode != 0 or not p.stdout.strip():
+        raise cc.CCError(cc.EX_FAIL, f"gh api user: {p.stderr.strip() or 'not logged in'} (run `gh auth login`)")
+    return p.stdout.strip()
+
+
+def last_page(r: Resp) -> int | None:
+    m = re.search(r'[?&]page=(\d+)>;\s*rel="last"', r.headers.get("link", ""))
+    return int(m.group(1)) if m else None
+
+
+# ---------------------------------------------------------------- gathering
+
+
+def day(ts: str | None) -> dt.date | None:
+    return dt.date.fromisoformat(ts[:10]) if ts else None
+
+
+def first_line(msg: str) -> str:
+    return (msg or "").strip().splitlines()[0].strip() if (msg or "").strip() else ""
+
+
+def commit_row(c: dict) -> dict:
+    a = c.get("commit", {}).get("author") or c.get("commit", {}).get("committer") or {}
+    return {"sha": c["sha"], "date": (a.get("date") or "")[:10], "message": first_line(c.get("commit", {}).get("message", ""))}
+
+
+def git_name() -> str:
+    p = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, check=False)
+    return p.stdout.strip()
+
+
+def identities(extra: list[str], vault: Path) -> set[str]:
+    """Lower-cased logins and names that are the owner (see Tier in the docstring)."""
+    env = [x.strip() for x in os.environ.get("PROJECT_IMPORT_ME", "").split(",")]
+    ids = {x.lower() for x in [*extra, *env] if x}
+    if not extra:  # --me replaces the defaults; PROJECT_IMPORT_ME always adds
+        name = "" if FIXTURE else git_name()
+        ids |= {x.lower() for x in (whoami(), name) if x}
+        if name:
+            note = vault / "memory" / "people" / f"{re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')}.md"
+            fm = read_fm(note) if note.is_file() else {}
+            for key in ("github", "git_authors"):
+                v = fm.get(key)
+                ids |= {str(x).lower() for x in ([v] if isinstance(v, str) else v or []) if x}
+    return ids
+
+
+def count_own(raw: list[dict], me: set[str]) -> int | None:
+    """Commits whose GitHub login or git name is the owner's; None when no commit names anyone."""
+    seen, own = False, 0
+    domains = tuple(x for x in me if x.startswith("@"))
+    for c in raw:
+        who = {((c.get(k) or {}).get("login") or "").lower() for k in ("author", "committer")}
+        for k in ("author", "committer"):
+            g = c.get("commit", {}).get(k) or {}
+            who |= {(g.get("name") or "").lower(), (g.get("email") or "").lower()}
+        who.discard("")
+        seen = seen or bool(who)
+        own += bool(who & me) or any(w.endswith(domains) for w in who if "@" in w and domains)
+    return own if seen else None
+
+
+def propose_tier(fork: bool, own_commits: int | None, commits: int, has_readme: bool, has_hub: bool = False) -> str:
+    if has_hub:
+        return "hub"
+    if own_commits == 0 or (fork and not own_commits):
+        return "skip"
+    if commits < 10 or not has_readme:
+        return "catalogue"
+    return "hub"
+
+
+def gather(full: str, me: set[str] = frozenset()) -> dict:
+    meta = gh_json(f"repos/{full}", ok404=True)
+    if meta is None:
+        raise cc.CCError(cc.EX_FAIL, f"no repo {full} on GitHub (or gh's account can't see it)")
+    full = meta["full_name"]
+    branch = meta.get("default_branch") or "main"
+    info: dict = {"meta": meta, "full": full, "branch": branch, "sha": None, "commits": 0, "history": [],
+                  "first": None, "tree": [], "tree_truncated": False, "files": {}, "own_commits": None}
+
+    r = gh_get(f"repos/{full}/commits?sha={quote(branch)}&per_page=100")
+    if r.status == 409:  # empty repository
+        pass
+    elif not 200 <= r.status < 300:
+        raise cc.CCError(cc.EX_FAIL, f"GitHub {r.status} listing commits of {full}")
+    else:
+        page1 = r.json() or []
+        raw = list(page1)
+        if page1:
+            sha = info["sha"] = page1[0]["sha"]
+            history = [commit_row(c) for c in page1]
+            if last_page(r) is None:
+                info["commits"] = len(page1)
+                info["first"] = history[-1]
+            else:
+                total = last_page(gh_get(f"repos/{full}/commits?sha={sha}&per_page=1")) or len(page1)
+                info["commits"] = total
+                for p in range(2, min(MAX_COMMIT_PAGES, -(-total // 100)) + 1):
+                    more = gh_json(f"repos/{full}/commits?sha={sha}&per_page=100&page={p}") or []
+                    raw += more
+                    history += [commit_row(c) for c in more]
+                first = gh_json(f"repos/{full}/commits?sha={sha}&per_page=1&page={total}") or []
+                info["first"] = commit_row(first[0]) if first else history[-1]
+            info["history"] = history
+            info["own_commits"] = count_own(raw, me) if me else None
+
+    langs = gh_json(f"repos/{full}/languages", ok404=True) or {}
+    total_bytes = sum(langs.values()) or 1
+    info["languages"] = {k: round(100 * v / total_bytes, 1) for k, v in sorted(langs.items(), key=lambda kv: -kv[1])[:6]}
+
+    if info["sha"]:
+        t = gh_json(f"repos/{full}/git/trees/{info['sha']}?recursive=1", ok404=True) or {}
+        info["tree"] = [(e["path"], e["type"]) for e in t.get("tree", []) if e.get("type") in ("blob", "tree")]
+        info["tree_truncated"] = bool(t.get("truncated"))
+        blobs = {p for p, kind in info["tree"] if kind == "blob"}
+        wanted = sorted(p for p in blobs if "/" not in p and README_RE.match(p))
+        for name in KEY_FILES:
+            hit = [p for p in blobs if p.lower() == name.lower()] or [p for p in blobs if p.lower() == f"docs/{name.lower()}"]
+            wanted += sorted(hit)[:1]
+        for path in wanted:
+            fr = gh_get(f"repos/{full}/contents/{quote(path)}?ref={info['sha']}", raw=True)
+            if fr.status == 200:
+                info["files"][path] = fr.body
+
+    parent = meta.get("parent") or {}
+    if meta.get("fork") and parent.get("full_name") and info["sha"]:
+        cmp = gh_json(f"repos/{parent['full_name']}/compare/{quote(parent.get('default_branch') or 'main')}"
+                      f"...{meta['owner']['login']}:{quote(branch)}", ok404=True)
+        if info["own_commits"] is None:
+            info["own_commits"] = cmp.get("ahead_by") if cmp else None
+    has_readme = any(README_RE.match(p) or p.lower() == "claude.md" for p in info["files"])
+    info["tier"] = propose_tier(bool(meta.get("fork")), info["own_commits"], info["commits"], has_readme)
+    return info
+
+
+# ---------------------------------------------------------------- rendering
+
+
+def front_matter(info: dict, created: dt.date, updated: dt.date) -> dict:
+    m = info["meta"]
+    fm: dict = {"type": "source", "kind": "repo", "generated": "project-import", "created": created, "updated": updated,
+                "repo": info["full"], "url": m.get("html_url") or f"https://github.com/{info['full']}"}
+    if info["sha"]:
+        fm["as_of"] = info["sha"]
+    fm["default_branch"] = info["branch"]
+    fm["visibility"] = m.get("visibility") or ("private" if m.get("private") else "public")
+    fm["fork"] = bool(m.get("fork"))
+    if m.get("fork") and m.get("parent"):
+        fm["parent"] = m["parent"]["full_name"]
+    fm["archived"] = bool(m.get("archived"))
+    if m.get("description"):
+        fm["description"] = m["description"].strip()
+    for k in ("created_at", "pushed_at"):
+        if m.get(k):
+            fm[k] = day(m[k])
+    fm["languages"] = info["languages"]
+    # GitHub's topics are plain words; the schema's `topics` holds links to memory/topics/, so they get their own name.
+    fm["repo_topics"] = list(m.get("topics") or [])
+    fm["size_kb"] = m.get("size", 0)
+    fm["commits"] = info["commits"]
+    if info["own_commits"] is not None:
+        fm["own_commits"] = info["own_commits"]
+    fm["stars"] = m.get("stargazers_count", 0)
+    return fm
+
+
+class _Dumper(yaml.SafeDumper):
+    def ignore_aliases(self, data) -> bool:  # created == updated must not become &id001 / *id001
+        return True
+
+
+class _Block(dict):
+    """The front matter itself: always one property per line, whatever flow style its values get."""
+
+
+_Dumper.add_representer(_Block, lambda d, data: d.represent_mapping("tag:yaml.org,2002:map", data, flow_style=False))
+
+
+def dump_fm(fm: dict) -> str:
+    text = yaml.dump(_Block(fm), Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=1000, default_flow_style=None)
+    return "---\n" + text + "---\n"
+
+
+def render_activity(info: dict) -> list[str]:
+    hist = info["history"]
+    if not hist:
+        return ["## Activity", "", "_No commits._", ""]
+    last, first = hist[0], info["first"] or hist[-1]
+    out = ["## Activity", "",
+           f"- First commit: {first['date']} — {first['message']} (`{first['sha'][:7]}`)",
+           f"- Last commit: {last['date']} — {last['message']} (`{last['sha'][:7]}`)",
+           f"- Commits: {info['commits']}" + (f" (the counts below cover the most recent {len(hist)})" if len(hist) < info["commits"] else ""),
+           "", "### Commits per month", ""]
+    by_month = Counter(c["date"][:7] for c in hist if c["date"])
+    years: dict[str, list[str]] = {}
+    for ym in sorted(by_month):
+        years.setdefault(ym[:4], []).append(f"{dt.date(int(ym[:4]), int(ym[5:7]), 1):%b} {by_month[ym]}")
+    for y in sorted(years):
+        out.append(f"- {y} ({sum(v for k, v in by_month.items() if k.startswith(y))}): " + " · ".join(years[y]))
+    seen: set[str] = set()
+    candidates = []
+    for c in reversed(hist):  # oldest first
+        if c["sha"] in (first["sha"], last["sha"]) or not c["message"] or NOISE_RE.match(c["message"]):
+            continue
+        if c["message"].lower() in seen:
+            continue
+        seen.add(c["message"].lower())
+        candidates.append(c)
+    if len(candidates) > NOTABLE:  # spread evenly over the history rather than the latest fifteen
+        step = (len(candidates) - 1) / (NOTABLE - 1)
+        candidates = [candidates[round(i * step)] for i in range(NOTABLE)]
+    if candidates:
+        out += ["", "### Notable commits", ""] + [f"- {c['date']} — {c['message']} (`{c['sha'][:7]}`)" for c in candidates]
+    return out + [""]
+
+
+def render_tree(info: dict) -> list[str]:
+    entries = info["tree"]
+    if not entries:
+        return ["## Tree", "", "_Empty._", ""]
+    kinds = dict(entries)
+
+    def children(prefix: str) -> list[str]:
+        depth = prefix.count("/") + (1 if prefix else 0)
+        kids = [p for p, _ in entries if p.count("/") == depth and (not prefix or p.startswith(prefix + "/"))]
+        return sorted(kids, key=lambda p: (kinds[p] != "tree", p.lower()))
+
+    lines: list[str] = []
+    for top in children(""):
+        lines.append(top + ("/" if kinds[top] == "tree" else ""))
+        if kinds[top] == "tree":
+            kids = children(top)
+            lines += ["  " + p.split("/")[-1] + ("/" if kinds[p] == "tree" else "") for p in kids[:TREE_DIR_CAP]]
+            if len(kids) > TREE_DIR_CAP:
+                lines.append(f"  … {len(kids) - TREE_DIR_CAP} more")
+    total = len(lines)
+    lines = lines[:TREE_CAP]
+    out = ["## Tree", "", "```text", *lines, "```"]
+    notes = []
+    if total > TREE_CAP:
+        notes.append(f"{total - TREE_CAP} more entries not shown")
+    if info["tree_truncated"]:
+        notes.append("GitHub truncated the tree listing")
+    if notes:
+        out += ["", f"_{'; '.join(notes)}._"]
+    return out + [""]
+
+
+def demote(text: str) -> str:
+    """Push a Markdown file's headings two levels down, so they nest under its `## File:` heading.
+
+    ATX and setext headings outside fenced code; the words are untouched.
+    """
+    out, fence = [], None
+    for line in text.splitlines():
+        m = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if m:
+            fence = None if fence and m.group(1)[0] == fence else (fence or m.group(1)[0])
+        elif not fence and re.match(r"^#{1,6}\s", line):
+            line = ("##" + line) if not line.startswith("#####") else "######" + line.lstrip("#")
+        elif not fence and re.match(r"^(=+|-+)\s*$", line) and out and out[-1].strip() and not re.match(r"^\s*([#>*+-]|\d+\.)", out[-1]):
+            out[-1] = ("### " if line.startswith("=") else "#### ") + out[-1].strip()  # setext heading
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def render_files(info: dict) -> list[str]:
+    out: list[str] = []
+    for path, text in info["files"].items():
+        if path.lower().endswith((".md", ".markdown")):
+            text = demote(text)
+        data = text.encode("utf-8")
+        out += [f"## File: {path}", ""]
+        if len(data) > FILE_CAP:
+            out += [data[:FILE_CAP].decode("utf-8", "ignore").rstrip(), "",
+                    f"_Truncated: the first {FILE_CAP // 1024} KB of {len(data) // 1024} KB._"]
+        else:
+            out.append(text.rstrip())
+        out.append("")
+    return out
+
+
+def render_docs(info: dict) -> list[str]:
+    paths = sorted(p for p, kind in info["tree"] if kind == "blob" and (p.lower().startswith("docs/") or DOCS_DIR_RE.search(p.rsplit("/", 1)[0] if "/" in p else "")))
+    if not paths:
+        return ["## Docs", "", "_No docs/, adr/ or decisions/ folder._", ""]
+    out = ["## Docs", ""] + [f"- `{p}`" for p in paths[:DOCS_CAP]]
+    if len(paths) > DOCS_CAP:
+        out += ["", f"_{len(paths) - DOCS_CAP} more not shown._"]
+    return out + [""]
+
+
+def render(info: dict, created: dt.date, updated: dt.date) -> str:
+    name = info["full"].split("/")[1]
+    body = [f"# {name}", "", f"> [!info] Generated by `project-import` from {info['full']} at "
+            f"`{(info['sha'] or 'empty')[:12]}`. Read-only: rerun `project-import {info['full']}` to refresh.", ""]
+    body += render_activity(info) + render_tree(info) + render_files(info) + render_docs(info)
+    return dump_fm(front_matter(info, created, updated)) + "\n" + "\n".join(body).rstrip() + "\n"
+
+
+# ---------------------------------------------------------------- writing
+
+
+def read_fm(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    m = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    try:
+        fm = yaml.safe_load(m.group(1)) if m else {}
+    except (yaml.YAMLError, ValueError):
+        return {}
+    return fm if isinstance(fm, dict) else {}
+
+
+def as_date(v, fallback: dt.date) -> dt.date:
+    if isinstance(v, dt.date):
+        return v
+    try:
+        return dt.date.fromisoformat(str(v))
+    except ValueError:
+        return fallback
+
+
+def write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def save(path: Path, text: str, dry: bool) -> bool:
+    """Write text if it differs from what is there. True when it changed (or would)."""
+    if path.is_file() and path.read_text(encoding="utf-8") == text:
+        return False
+    if not dry:
+        write_atomic(path, text)
+    return True
+
+
+def hub_repos(vault: Path) -> dict[str, str]:
+    """owner/repo (lower-cased) → hub name, for every hub in memory/projects/ (a checkout's hub is named
+    after its folder, which need not be the repo's name)."""
+    out = {}
+    for f in sorted((vault / "memory" / "projects").glob("*.md")):
+        repo = str(read_fm(f).get("repo") or "")
+        if "/" in repo:
+            out.setdefault(repo.lower(), f.stem)
+    return out
+
+
+def import_repo(full: str, vault: Path, today: dt.date, dry: bool, me: set[str] = frozenset()) -> dict:
+    info = gather(full, me)
+    if info["full"].lower() in hub_repos(vault):
+        info["tier"] = "hub"
+    path = vault / "sources" / "repos" / f"{info['full'].split('/')[1]}.md"
+    old = read_fm(path)
+    created = as_date(old.get("created"), today)
+    same = bool(old) and old.get("as_of") == info["sha"]
+    updated = as_date(old.get("updated"), today) if same else today
+    changed = save(path, render(info, created, updated), dry)
+    return {"repo": info["full"], "tier": info["tier"], "path": str(path), "changed": changed,
+            "metadata": front_matter(info, created, updated)}
+
+
+def human_size(kb: int) -> str:
+    return f"{kb} KB" if kb < 1024 else f"{kb / 1024:.1f} MB" if kb < 1024 * 1024 else f"{kb / 1048576:.1f} GB"
+
+
+def cell(s) -> str:
+    return str(s or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def node_ids(me: set[str]) -> list[str]:
+    """GitHub node ids of the identities that are accounts (names with spaces are not)."""
+    out = []
+    for login in sorted(x for x in me if re.fullmatch(r"[a-z0-9-]{1,39}", x)):
+        u = gh_json(f"users/{login}", ok404=True)
+        if u and u.get("node_id") and u.get("type") == "User":
+            out.append(u["node_id"])
+    return out
+
+
+def mine(r: dict) -> str:
+    """The Commits cell: total, or the owner's of the total when they were counted."""
+    return str(r["commits"]) if r.get("own_commits") is None else f"{r['own_commits']} of {r['commits']}"
+
+
+def catalogue(owner: str, vault: Path, today: dt.date, dry: bool, me: set[str] = frozenset()) -> tuple[list[dict], bool, Path]:
+    rows, cursor = [], None
+    ids = node_ids(me)
+    emails = sorted(x for x in me if "@" in x and not x.startswith("@"))
+    hubbed = hub_repos(vault)
+    while True:
+        page = gh_graphql(owner, cursor, ids, emails)
+        for n in page.get("nodes") or []:
+            target = ((n.get("defaultBranchRef") or {}).get("target") or {})
+            names = [e["name"] for e in ((n.get("object") or {}).get("entries") or [])]
+            has_readme = any(README_RE.match(x) or x.lower() == "claude.md" for x in names)
+            commits = (target.get("history") or {}).get("totalCount", 0)
+            counts = [(target.get(f"mine{i}") or {}).get("totalCount") for i in range(len(ids))]
+            if emails:  # may double-count a commit both an account and an email claim; only zero matters
+                counts.append((target.get("mineE") or {}).get("totalCount"))
+            own = sum(c for c in counts if c is not None) if counts and any(c is not None for c in counts) else None
+            rows.append({
+                "repo": n["name"], "created": (n.get("createdAt") or "")[:10], "pushed": (n.get("pushedAt") or "")[:10],
+                "language": (n.get("primaryLanguage") or {}).get("name", ""), "size_kb": n.get("diskUsage") or 0,
+                "commits": commits, "fork": n.get("isFork", False), "archived": n.get("isArchived", False),
+                "visibility": (n.get("visibility") or "").lower(), "description": (n.get("description") or "").strip(),
+                "own_commits": own, "_readme": has_readme,
+                "tier": propose_tier(n.get("isFork", False), own, commits, has_readme,
+                                     f"{owner}/{n['name']}".lower() in hubbed),
+            })
+        info = page.get("pageInfo") or {}
+        if not info.get("hasNextPage"):
+            break
+        cursor = info.get("endCursor")
+    # A non-fork with none of the owner's commits by account may have them under a name or an email no
+    # account claims: one REST page of its commits settles it (forks are left to a per-repo import).
+    for r in rows:
+        if r["own_commits"] == 0 and not r["fork"] and r["commits"]:
+            raw = gh_json(f"repos/{owner}/{r['repo']}/commits?per_page=100", ok404=True) or []
+            own = count_own(raw, me)
+            if own:
+                r["own_commits"] = own
+                r["tier"] = propose_tier(False, own, r["commits"], r.pop("_readme"), False)
+        r.pop("_readme", None)
+    rows.sort(key=lambda r: (r["pushed"], r["repo"].lower()), reverse=True)
+    hubs = vault / "memory" / "projects"
+    lines = ["| Repo | Created | Last push | Language | Size | Commits | Tier | Description | Hub |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for r in rows:
+        name = hubbed.get(f"{owner}/{r['repo']}".lower()) or (r["repo"] if (hubs / f"{r['repo']}.md").is_file() else "")
+        r["hub"] = bool(name)
+        r["hub_name"] = name
+        flags = "".join([" (fork)" if r["fork"] else "", " (archived)" if r["archived"] else ""])
+        lines.append(f"| {cell(r['repo'])}{flags} | {r['created'][:4]} | {r['pushed']} | {cell(r['language'])} | "
+                     f"{human_size(r['size_kb'])} | {mine(r)} | {r['tier']} | {cell(r['description'])} | "
+                     f"{'[[memory/projects/' + name + ']]' if name else ''} |")
+    tiers = Counter(r["tier"] for r in rows)
+    body = "\n".join([
+        f"# Projects catalogue — {owner}", "",
+        "> [!info] Generated by `project-import --catalogue`. Read-only. Tiers are proposals: `hub` repos get "
+        "`memory/projects/<repo>.md`, `catalogue` repos live only here, `skip` have none of the owner's commits "
+        "(forks, and other people's code pushed here).", "",
+        f"{len(rows)} repos: {tiers['hub']} hub · {tiers['catalogue']} catalogue · {tiers['skip']} skip.", "",
+        *lines,
+    ]) + "\n"
+    path = hubs / "_catalogue.md"
+    old = read_fm(path)
+    created = as_date(old.get("created"), today)
+    old_body = path.read_text(encoding="utf-8").split("\n---\n", 1)[-1].lstrip("\n") if path.is_file() else None
+    updated = as_date(old.get("updated"), today) if old_body == body else today
+    fm = {"type": "map", "generated": "project-import", "created": created, "updated": updated, "owner": owner,
+          "repos": len(rows)}
+    changed = save(path, dump_fm(fm) + "\n" + body, dry)
+    return rows, changed, path
+
+
+# ---------------------------------------------------------------- main
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("-h", "--help", action="store_true")
+    ap.add_argument("repos", nargs="*")
+    ap.add_argument("--vault", type=Path)
+    ap.add_argument("--catalogue", action="store_true")
+    ap.add_argument("--owner")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--me", action="append", default=[])
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        return cc.EX_USAGE
+    if args.help:
+        print(__doc__)
+        return cc.EX_OK
+    if args.catalogue == bool(args.repos):
+        raise cc.CCError(cc.EX_USAGE, "give either owner/repo arguments or --catalogue (see --help)")
+    if args.owner and not args.catalogue:
+        raise cc.CCError(cc.EX_USAGE, "--owner goes with --catalogue")
+    bad = [r for r in args.repos if not REPO_RE.match(r)]
+    if bad:
+        raise cc.CCError(cc.EX_USAGE, f"not owner/repo: {', '.join(bad)}")
+    if not FIXTURE and not shutil.which("gh"):
+        raise cc.CCError(cc.EX_DEPS, "missing dependency: gh (brew install gh, then gh auth login)")
+    vault = (args.vault or Path(os.environ.get("CC_VAULT") or Path.home() / "vault")).expanduser()
+    if not vault.is_dir():
+        raise cc.CCError(cc.EX_CONFIG, f"vault not found at {vault}")
+    today = dt.date.today()
+    verb = "would import" if args.dry_run else "imported"
+
+    if args.catalogue:
+        owner = args.owner or whoami()
+        rows, changed, path = catalogue(owner, vault, today, args.dry_run, identities(args.me, vault))
+        if args.json:
+            json.dump({"owner": owner, "path": str(path), "changed": changed, "repos": rows}, sys.stdout, indent=2)
+            print()
+        else:
+            tiers = Counter(r["tier"] for r in rows)
+            state = ("would write" if args.dry_run else "wrote") if changed else "unchanged"
+            print(f"catalogue {owner}: {len(rows)} repos ({tiers['hub']} hub, {tiers['catalogue']} catalogue, "
+                  f"{tiers['skip']} skip) — {state} {path}")
+        return cc.EX_OK
+
+    owner = None
+    results = []
+    me = identities(args.me, vault)
+    for r in args.repos:
+        if "/" not in r:
+            owner = owner or whoami()
+            r = f"{owner}/{r}"
+        res = import_repo(r, vault, today, args.dry_run, me)
+        results.append(res)
+        if not args.json:
+            md = res["metadata"]
+            print(f"{verb} {res['repo']} @ {(md.get('as_of') or 'empty')[:7]} ({md['commits']} commits, {res['tier']})"
+                  + ("" if res["changed"] else " — unchanged"))
+    if args.json:
+        json.dump(results, sys.stdout, indent=2, default=str)
+        print()
+    return cc.EX_OK
+
+
+if __name__ == "__main__":
+    cc.run_main(main)

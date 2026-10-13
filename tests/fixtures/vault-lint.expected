@@ -1,0 +1,36 @@
+memory/commitments/2026-10-20-call-back.md:1: required: commitment needs `made_in`
+memory/commitments/2026-10-20-call-back.md:3: date: created: '2026-10-01 10:00' is not a YYYY-MM-DD date
+memory/commitments/2026-10-20-call-back.md:6: enum: status: 'pending' is not one of open · done · dropped
+memory/decisions/broken-yaml.md:4: frontmatter: invalid YAML: expected ',' or ']', but got '<stream end>'
+memory/decisions/no-front-matter.md:1: frontmatter: no front matter block
+memory/meetings/2026-10-03-standup.md:1: folder: a meeting belongs in memory/meetings/YYYY/
+memory/meetings/2026-10-03-standup.md:1: required: meeting needs `transcript`
+memory/meetings/2026-10-03-standup.md:5: link-format: attendees: 'Sam' is not a [[wikilink]]
+memory/meetings/2026-10-03-standup.md:6: link: orgs: [[memory/orgs/nowhere]] does not resolve
+memory/orgs/Bad_Name.md:1: duplicate: org identity 'acme' is also memory/orgs/acme-corp.md
+memory/orgs/Bad_Name.md:1: filename: 'Bad_Name.md' is not a kebab-case slug
+memory/orgs/Bad_Name.md:1: required: org needs `name`
+memory/orgs/Bad_Name.md:4: enum: kind: 'startup' is not one of client · company · investor · vendor · community · other
+memory/orgs/acme-corp.md:1: duplicate: org identity 'acme' is also memory/orgs/Bad_Name.md
+memory/people/priya-shah.md:6: ties: tie 1: relationship 'boss' is not one of client · colleague · partner · advisee · advisor · investor · vendor · friend · family · other
+memory/people/priya-shah.md:6: ties: tie 1: unknown key 'from' (one of: relationship, org, since, until, source)
+memory/people/priya-shah.md:6: ties: tie 2 needs `source`
+memory/people/priya-shah.md:6: ties: tie 2: org 'Acme Corp' is not a [[memory/orgs/…]] link
+memory/people/priya-shah.md:6: ties: tie 2: since: '2026-13-01' is not a YYYY-MM-DD date
+memory/people/priya-shah.md:6: ties: tie 3: org '[[memory/people/sam-rivera]]' is not a [[memory/orgs/…]] link
+memory/people/priya-shah.md:6: ties: tie 3: since 2026-09-01 is after until 2026-03-01
+memory/people/priya-shah.md:6: ties: tie 3: source 'the call' is not a [[wikilink]]
+memory/people/priya-shah.md:6: ties: tie 4 is not a mapping
+memory/people/sam-r.md:1: duplicate: person identity 'sam r' is also memory/people/sam-rivera.md
+memory/people/sam-r.md:5: enum: relationship: 'boss' is not one of client · colleague · partner · advisee · advisor · investor · vendor · friend · family · other
+memory/people/sam-r.md:6: date: last_contact: '02/10/2026' is not a YYYY-MM-DD date
+memory/people/sam-r.md:11: log-citation: log bullet does not end with its source, ([[…]])
+memory/people/sam-r.md:12: link: log source [[memory/meetings/2026/2026-10-05-nowhere]] does not resolve
+memory/people/sam-rivera.md:1: duplicate: person identity 'sam r' is also memory/people/sam-r.md
+memory/projects/gadget.md:11: markers: a marker's tail with no `<!-- <script>:start` before it
+memory/projects/gadget.md:13: markers: tasks-sync:end with no tasks-sync:start before it
+memory/stray-note.md:1: folder: a note belongs in notes/ (flat)
+memory/topics/mystery.md:2: type: unknown type 'thing' (one of: note, daily, person, org, meeting, decision, commitment, topic, project, source, transcript, map)
+sources/repos/OldWidget.md:3: enum: kind: 'repository' is not one of transcript · clip · report · repo · email · feed · book · paper · confirmation
+sources/repos/OldWidget.md:7: date: pushed_at: '2026-13-01' is not a YYYY-MM-DD date
+vault-lint: 20 notes checked, 35 errors in 13 notes (date 3, duplicate 4, enum 4, filename 1, folder 2, frontmatter 2, link 2, link-format 1, log-citation 1, markers 2, required 3, ties 9, type 1)

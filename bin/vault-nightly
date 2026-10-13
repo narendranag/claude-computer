@@ -1,0 +1,642 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""vault-nightly — the vault's unattended night shift: transcripts and inbox captures into the memory graph.
+
+Runs /inbox (which runs /transcripts first) with `claude -p`, nobody watching, and lands the result only if
+it passes the gate. Order:
+
+  1. transcripts-sync; list the work: unprocessed transcripts, then captures in inbox/ (quick.md only when
+     dictated into), oldest first, capped per run (--max-transcripts, --max-captures); then project hubs to
+     write (--max-hubs): hubs tasks-sync created that are still bare (properties and Tasks only), then
+     catalogue repos of tier `hub` with no hub, newest push first. No work → exit 0.
+  2. vault-lint on the vault as it is; failing already → stop (the gate could never pass).
+  3. A git worktree of the vault on branch nightly/<stamp> under ~/.cache/claude-computer/vault-nightly/.
+     Claude works there, never in ~/vault, so Obsidian Git can't commit half a run and a failed run leaves
+     ~/vault and its inbox exactly as they were. .nightly/run.md tells it the files and the brains; each
+     hub's repo gets a fresh snapshot (project-import, committed in the worktree) before Claude starts.
+  4. claude -p '/inbox nightly' in the worktree: --permission-mode dontAsk with a short --allowedTools list
+     (read/edit, git mv/add/commit, vault-lint, gcal at/day/search), so anything else is refused, not asked.
+     Tasks for other brains go to .nightly/tasks.jsonl, never straight into their TASKS.md.
+  5. The gate: vault-lint over memory/ and over every other note the run touched; no file deleted outside
+     inbox/; nothing left uncommitted. Fail → tg-send, keep the worktree for a look, exit 1.
+  6. Merge nightly/<stamp> into ~/vault. Then apply each routed task to its brain's TASKS.md under
+     `## Next` and commit there (`tasks: from vault <source>`), pulling first and pushing after.
+  7. `## Overnight` in daily/<today>.md, between vault-nightly markers: commits, new memory notes, filed
+     captures, tasks routed (with the brain's commit), what was left, and Claude's own report. Commit,
+     push the vault, tasks-sync, one tg-send line. The worktree and branch are removed.
+
+Usage:
+  vault-nightly [--dry-run] [--vault DIR] [--max-transcripts N] [--max-captures N] [--timeout MIN]
+                [--no-route] [--quiet]
+
+  --dry-run          list the work and the brains, write .nightly/run.md's text to stdout; change nothing
+  --max-transcripts  per run (default 6)       --max-captures  per run (default 12)
+  --max-hubs         project hubs per run (default 4; needs gh)
+  --timeout          minutes for the claude run (default 90)
+  --no-route         list routed tasks under ## Overnight but don't touch any brain (for a trial on a
+                     copy of the vault: --vault <clone> --no-route --quiet)
+  --quiet            no tg-send
+
+Logs: ~/Library/Logs/claude-computer/vault-nightly.log (when scheduled). Run dirs:
+~/.cache/claude-computer/vault-nightly/<stamp>/ (claude's JSON output; the worktree, while it exists).
+
+Exit codes: 0 ok, or nothing to do · 1 the gate, the merge or claude failed (~/vault untouched) ·
+            2 usage · 3 claude or git missing · 5 no vault, or another run holds the lock
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import fcntl
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import cc  # noqa: E402
+
+BIN = cc.ROOT / "bin"
+CACHE = Path.home() / ".cache" / "claude-computer" / "vault-nightly"
+START, END = "<!-- vault-nightly:start -->", "<!-- vault-nightly:end -->"
+FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+ALLOWED_TOOLS = ",".join([
+    "Read", "Edit", "Write", "Glob", "Grep",
+    "Bash(git status:*)", "Bash(git mv:*)", "Bash(git add:*)", "Bash(git commit:*)", "Bash(git log:*)",
+    "Bash(git diff:*)", "Bash(vault-lint:*)", "Bash(gcal at:*)", "Bash(gcal day:*)", "Bash(gcal search:*)",
+    "Bash(rg:*)", "Bash(ls:*)", "Bash(mkdir:*)",
+])
+TASK_MAX = 300
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def log(msg: str) -> None:
+    print(f"{dt.datetime.now():%H:%M:%S} {msg}", flush=True)
+
+
+def run(cmd: list[str], cwd: Path | None = None, **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False, **kw)
+
+
+def sync_tasks(vault: Path) -> None:
+    """tasks-sync, then commit what it wrote: an uncommitted hub it made would collide with the same hub
+    made on the next run's branch (add/add), since that branch starts from HEAD."""
+    run([str(BIN / "tasks-sync"), "--vault", str(vault)])
+    paths = [p for p in ("memory/projects", "maps/tasks.md") if (vault / p).exists()]  # git add fails on a missing one
+    if paths and git(vault, "status", "--porcelain", "--", *paths).stdout.strip():
+        git(vault, "add", "--", *paths)
+        git(vault, "commit", "-q", "-m", "tasks: sync", "--", *paths)
+
+
+def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    """git with a retry when another writer (Obsidian Git) holds the index for a moment."""
+    for attempt in range(4):
+        r = run(["git", "-C", str(repo), *args])
+        if r.returncode == 0 or "index.lock" not in r.stderr:
+            return r
+        time.sleep(2 * (attempt + 1))
+    return r
+
+
+QUIET = False
+
+
+def tg(text: str) -> None:
+    if QUIET:
+        log(f"(quiet) {text}")
+    else:
+        run([str(BIN / "tg-send"), text])
+
+
+def prop(text: str, key: str) -> str:
+    m = FM_RE.match(text)
+    for line in (m.group(1).splitlines() if m else []):
+        k, sep, v = line.partition(":")
+        if sep and k.strip() == key:
+            return v.strip().strip('"').strip("'")
+    return ""
+
+
+def quick_has_content(f: Path) -> bool:
+    """quick.md counts as work only when something was dictated into it: body text past the title,
+    the comment and blank lines."""
+    m = FM_RE.match(f.read_text(encoding="utf-8"))
+    body = f.read_text(encoding="utf-8")[m.end():] if m else f.read_text(encoding="utf-8")
+    body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
+    return any(ln.strip() and not ln.startswith("# ") for ln in body.splitlines())
+
+
+def find_work(vault: Path, max_t: int, max_c: int) -> tuple[list[str], list[str], list[str]]:
+    """(transcripts, captures, left) as vault-relative paths; left = beyond this run's caps."""
+    td = vault / "inbox" / "transcripts"
+    ts = []
+    for f in sorted(td.glob("*.md")) if td.is_dir() else []:
+        text = f.read_text(encoding="utf-8")
+        if prop(text, "status") == "unprocessed":
+            ts.append((prop(text, "date") or f.name, f))
+    ts.sort()
+    caps = []
+    inbox = vault / "inbox"
+    for f in sorted(inbox.iterdir()) if inbox.is_dir() else []:
+        if not f.is_file() or f.name.startswith("."):
+            continue
+        if f.name == "quick.md" and not quick_has_content(f):
+            continue
+        caps.append((f.stat().st_mtime, f))
+    caps.sort()
+    rel = lambda f: str(f.relative_to(vault))  # noqa: E731
+    t_all, c_all = [rel(f) for _, f in ts], [rel(f) for _, f in caps]
+    return t_all[:max_t], c_all[:max_c], t_all[max_t:] + c_all[max_c:]
+
+
+CELL_SPLIT = re.compile(r"(?<!\\)\|")
+BLOCK_RE = re.compile(r"<!-- tasks-sync:start.*?<!-- tasks-sync:end -->", re.S)
+
+
+def bare(text: str) -> bool:
+    """A hub with nothing but properties, its title and the tasks-sync block."""
+    m = FM_RE.match(text)
+    body = BLOCK_RE.sub("", text[m.end():] if m else text)
+    return not re.sub(r"^# .*$", "", body, flags=re.M).strip()
+
+
+def find_hubs(vault: Path, n: int) -> list[dict]:
+    """[{repo, hub, new}] — bare hubs first (active work), then catalogue `hub` repos without one."""
+    if n <= 0:
+        return []
+    pdir = vault / "memory" / "projects"
+    out, have = [], set()
+    for f in sorted(pdir.glob("*.md")) if pdir.is_dir() else []:
+        text = f.read_text(encoding="utf-8")
+        repo = prop(text, "repo")
+        if "/" in repo:
+            have.add(repo.lower())
+            if not f.name.startswith("_") and bare(text):
+                out.append({"repo": repo, "hub": f.stem, "new": False})
+    cat = pdir / "_catalogue.md"
+    owner = prop(cat.read_text(encoding="utf-8"), "owner") if cat.is_file() else ""
+    for ln in cat.read_text(encoding="utf-8").splitlines() if owner else []:
+        cells = [c.strip() for c in CELL_SPLIT.split(ln)[1:-1]]
+        if len(cells) != 9 or cells[6] != "hub" or cells[8]:
+            continue
+        name = re.sub(r" \((fork|archived)\)", "", cells[0]).strip()
+        full = f"{owner}/{name}"
+        if full.lower() in have or (pdir / f"{name}.md").exists() or name == "vault":
+            continue
+        out.append({"repo": full, "hub": name, "new": True})
+    return out[:n]
+
+
+def brains() -> list[tuple[str, Path]]:
+    """tasks-sync owns what a brain is and what it is called."""
+    sys.dont_write_bytecode = True  # no bin/__pycache__ left beside the scripts
+    loader = importlib.machinery.SourceFileLoader("tasks_sync", str(BIN / "tasks-sync"))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("tasks_sync", loader))
+    sys.modules["tasks_sync"] = mod  # dataclasses look themselves up there
+    loader.exec_module(mod)
+    return mod.find_brains(Path.home())
+
+
+def brain_line(name: str, path: Path) -> str:
+    """name, home-relative path and the first sentence of its CLAUDE.md, so Claude can route without
+    reading any brain."""
+    desc = ""
+    try:
+        for ln in (path / "CLAUDE.md").read_text(encoding="utf-8").splitlines():
+            s = ln.strip().lstrip("#").strip()
+            s = re.sub(r"^CLAUDE\.md\s*[—-]?\s*", "", s)
+            if s and not s.startswith(("---", "<!--", "|", "@")) and ":" not in s[:12]:
+                desc = s[:140]
+                break
+    except OSError:
+        pass
+    return f"- `{name}` — ~/{path.relative_to(Path.home())} — {desc}"
+
+
+def hubs_md(hubs: list[dict]) -> list[str]:
+    if not hubs:
+        return []
+    return [
+        "## Projects",
+        "",
+        "Write these hubs, per the vault's `CLAUDE.md` → *Projects* and *Each entity note*, from each repo's "
+        "snapshot in `sources/repos/` (fresh tonight; read it whole). Every fact cites the snapshot. "
+        "A **new** hub: `type: project`, `created`, `status` (archived on GitHub → archived; otherwise judge from "
+        "the history: active · paused · done · abandoned · idea), `repo`, `started`, `ended` when it is over, "
+        "`stack`, `snapshot`; then a 2–5 line summary, `## What it was`, `## Outcome` and `## Lessons` where the "
+        "snapshot says enough (leave out what it doesn't), and `## Log`. A **bare** hub (made by tasks-sync): keep "
+        "its properties and the tasks-sync block exactly — the block runs from the whole line "
+        "`<!-- tasks-sync:start — generated, … -->` to `<!-- tasks-sync:end -->`, and no edit may touch either "
+        "line, so insert new text before the start line, never in place of it; add `started` and `stack`, the "
+        "summary under the title, the sections above the block, and `## Log` below it. Link people and orgs only if they already exist. "
+        "Commit as `projects: <n> hubs`.",
+        "",
+        *[f"- `memory/projects/{h['hub']}.md` — {'new' if h['new'] else 'bare'} — `{h['repo']}` — "
+          f"`sources/repos/{h['repo'].split('/')[1]}.md`" for h in hubs],
+        "",
+    ]
+
+
+def run_md(today: str, ts: list[str], cs: list[str], left: list[str], bs: list[tuple[str, Path]],
+           hubs: list[dict] = ()) -> str:
+    lines = [
+        f"# Nightly run — {today}",
+        "",
+        "Unattended. Nobody will answer a question. Take on these files and nothing else in `inbox/`:",
+        "",
+        "## Transcripts",
+        *[f"- `{p}`" for p in ts], *([] if ts else ["- none"]),
+        "",
+        "## Captures",
+        *[f"- `{p}`" for p in cs], *([] if cs else ["- none"]),
+        "",
+        f"Left for a later night: {len(left)} file(s). Leave them alone.",
+        "",
+        *hubs_md(list(hubs)),
+        "## Brains",
+        "",
+        "Route a task to one of these by its name in `.nightly/tasks.jsonl`. `vault` is this vault: write "
+        "Unassigned tasks into `TASKS.md` here directly, not into the jsonl.",
+        "",
+        *[brain_line(n, p) for n, p in bs],
+        "",
+        "## When you finish",
+        "",
+        "Everything committed (`transcripts: processed <n>`, `inbox: filed <n>`). `vault-lint --vault .` clean. "
+        "Your last message is the report: one line per transcript, capture and hub, then anything unsure.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def name_status(repo: Path, base: str, head: str) -> list[tuple[str, str]]:
+    """(status letter, path) per changed file. -z: git would otherwise quote a non-ASCII path ("inbox/\342…"),
+    and a quoted path no longer starts with inbox/."""
+    r = git(repo, "diff", "--name-status", "--no-renames", "-z", f"{base}..{head}")
+    parts = r.stdout.split("\0")
+    return [(parts[i][:1], parts[i + 1]) for i in range(0, len(parts) - 1, 2)]
+
+
+def changed(wt: Path, base: str) -> list[tuple[str, str]]:
+    return name_status(wt, base, "HEAD")
+
+
+def gate(wt: Path, base: str) -> list[str]:
+    problems = []
+    st = git(wt, "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=all")
+    dirty = [ln for ln in st.stdout.splitlines() if not ln[3:].startswith(".nightly/")]
+    if dirty:
+        problems.append(f"uncommitted: {', '.join(ln[3:] for ln in dirty[:5])}")
+    ch = changed(wt, base)
+    deleted = [p for s, p in ch if s == "D" and not p.startswith("inbox/")]
+    if deleted:
+        problems.append(f"deleted outside inbox/: {', '.join(deleted[:5])}")
+    env = {**os.environ, "CC_VAULT": str(wt)}
+    r = run([str(BIN / "vault-lint"), "--vault", str(wt)], env=env)
+    if r.returncode != 0:
+        problems.append("vault-lint (memory/): " + " | ".join(r.stdout.strip().splitlines()[-4:]))
+    others = [p for s, p in ch if s != "D" and p.endswith(".md") and not p.startswith(("memory/", "daily/"))
+              and p not in ("TASKS.md",) and not p.startswith("maps/")]
+    if others:
+        r = run([str(BIN / "vault-lint"), "--vault", str(wt), *[str(wt / p) for p in others]], env=env)
+        if r.returncode != 0:
+            problems.append("vault-lint (filed notes): " + " | ".join(r.stdout.strip().splitlines()[-4:]))
+    return problems
+
+
+def read_tasks(wt: Path, names: dict[str, Path]) -> tuple[list[dict], list[str]]:
+    f = wt / ".nightly" / "tasks.jsonl"
+    good, bad = [], []
+    for i, ln in enumerate(f.read_text(encoding="utf-8").splitlines() if f.is_file() else [], 1):
+        if not ln.strip():
+            continue
+        try:
+            t = json.loads(ln)
+        except json.JSONDecodeError:
+            bad.append(f"line {i}: not JSON")
+            continue
+        brain, task, src, due = t.get("brain"), str(t.get("task", "")).strip(), t.get("source", ""), t.get("due")
+        if brain not in names or brain == "vault":
+            bad.append(f"line {i}: unknown brain {brain!r}")
+        elif not task or "\n" in task or len(task) > TASK_MAX:
+            bad.append(f"line {i}: task text empty, multi-line or too long")
+        elif not src or not (wt / f"{src}.md").is_file():
+            bad.append(f"line {i}: source {src!r} not in the vault")
+        elif due and not DATE_RE.match(str(due)):
+            bad.append(f"line {i}: due {due!r} is not YYYY-MM-DD")
+        else:
+            good.append({"brain": brain, "task": task, "source": src, "due": due})
+    return good, bad
+
+
+def add_under_next(text: str, lines: list[str]) -> str:
+    """Insert lines at the end of ## Next (created before ## Later / ## Done, else at the end)."""
+    rows = text.splitlines()
+    i = next((k for k, r in enumerate(rows) if r.strip() == "## Next"), None)
+    if i is None:
+        j = next((k for k, r in enumerate(rows) if r.strip() in ("## Later", "## Done")), len(rows))
+        rows[j:j] = ["## Next", "", *lines, ""]
+        return "\n".join(rows) + "\n"
+    j = next((k for k in range(i + 1, len(rows)) if rows[k].startswith("## ")), len(rows))
+    while j > i + 1 and not rows[j - 1].strip():
+        j -= 1
+    rows[j:j] = lines
+    return "\n".join(rows) + "\n"
+
+
+def apply_tasks(tasks: list[dict], names: dict[str, Path]) -> list[str]:
+    """One commit per brain. Returns report lines."""
+    out = []
+    by: dict[str, list[dict]] = {}
+    for t in tasks:
+        by.setdefault(t["brain"], []).append(t)
+    for brain, ts in by.items():
+        repo = names[brain]
+        f = repo / "TASKS.md"
+        if not f.is_file():
+            out.append(f"`{brain}`: no TASKS.md — {len(ts)} task(s) not added")
+            continue
+        has_remote = bool(git(repo, "remote").stdout.strip())
+        if has_remote:
+            git(repo, "pull", "--rebase", "--autostash", "-q")
+        if git(repo, "diff", "--quiet", "--", "TASKS.md").returncode != 0:
+            out.append(f"`{brain}`: TASKS.md has uncommitted edits — {len(ts)} task(s) not added")
+            continue
+        lines = [f"- [ ] {t['task']}" + (f" 📅 {t['due']}" if t["due"] else "") + f" ← [[{t['source']}]]"
+                 for t in ts]
+        f.write_text(add_under_next(f.read_text(encoding="utf-8"), lines), encoding="utf-8")
+        srcs = sorted({t["source"].rsplit("/", 1)[-1] for t in ts})
+        msg = f"tasks: from vault {', '.join(srcs)[:120]}\n\nAdded by vault-nightly; revert this commit to undo."
+        r = git(repo, "commit", "-q", "-m", msg, "--", "TASKS.md")
+        if r.returncode != 0:
+            git(repo, "checkout", "--", "TASKS.md")
+            out.append(f"`{brain}`: commit failed ({r.stderr.strip()[:80]}) — {len(ts)} task(s) not added")
+            continue
+        sha = git(repo, "rev-parse", "--short", "HEAD").stdout.strip()
+        pushed = "" if not has_remote or git(repo, "push", "-q").returncode == 0 else " (not pushed)"
+        out.append(f"`{brain}` +{len(ts)} (`{sha}`{pushed}): " + "; ".join(t["task"][:80] for t in ts))
+    return out
+
+
+def title(vault: Path, rel: str) -> str:
+    try:
+        m = re.search(r"^# (.+)$", (vault / rel).read_text(encoding="utf-8"), re.M)
+        return m.group(1).strip() if m else Path(rel).stem
+    except OSError:
+        return Path(rel).stem
+
+
+def kind_of(vault: Path, rel: str) -> str:
+    """A filed item's kind: `note` for notes/, else the source's `kind` property."""
+    if rel.startswith("notes/"):
+        return "note"
+    try:
+        return prop((vault / rel).read_text(encoding="utf-8"), "kind") or "source"
+    except OSError:
+        return "source"
+
+
+def overnight_block(vault: Path, base: str, head: str, started: dt.datetime, summary: dict) -> str:
+    ch = changed_range(vault, base, head)
+    new_mem = [p for s, p in ch if s == "A" and p.startswith("memory/") and p.endswith(".md")]
+    filed = [p for s, p in ch if s == "A" and p.startswith(("notes/", "sources/")) and p.endswith(".md")]
+    commits = git(vault, "log", "--format=`%h` %s", f"{base}..{head}").stdout.strip().splitlines()
+    link = lambda p: f"[[{p[:-3]}|{title(vault, p)}]]"  # noqa: E731
+    groups: dict[str, list[str]] = {}
+    for p in new_mem:
+        groups.setdefault(p.split("/")[1], []).append(link(p))
+    filled = [p for s, p in ch if s == "M" and p.startswith("memory/projects/") and p.endswith(".md")]
+    lines = [START,
+             f"_vault-nightly · {started:%H:%M}–{dt.datetime.now():%H:%M} · "
+             f"{summary['t']} transcript(s), {summary['c']} capture(s), {summary.get('h', 0)} hub(s)"
+             f"{cost_note(summary)} · each commit below can be reverted_", ""]
+    lines += [f"- Commit {c}" for c in reversed(commits)] or ["- No vault commits."]
+    for g, ls in groups.items():
+        lines.append(f"- New {g}: " + ", ".join(ls))
+    for folder in ("notes/", "sources/"):
+        items = [p for p in filed if p.startswith(folder)]
+        if items:
+            lines.append(f"- Filed to `{folder}`: " + ", ".join(
+                link(p) if folder == "notes/" else f"{link(p)} ({kind_of(vault, p)})" for p in items))
+    if filled:
+        lines.append("- Hubs written: " + ", ".join(link(p) for p in filled))
+    for r in summary["tasks"]:
+        lines.append(f"- Tasks → {r}")
+    for b in summary["bad"]:
+        lines.append(f"- Task not routed: {b}")
+    if summary["left"]:
+        lines.append(f"- Left in the inbox for a later night: {summary['left']}")
+    if summary["report"]:
+        lines += ["", "> [!note]- Claude's report", *[f"> {ln}" for ln in summary["report"].splitlines()[:30]]]
+    lines.append(END)
+    return "\n".join(lines)
+
+
+def cost_note(summary: dict) -> str:
+    """ · $2.01, 65 turns — from claude's JSON; empty when it gave none."""
+    cost, turns = summary.get("cost"), summary.get("turns")
+    if not isinstance(cost, (int, float)):
+        return ""
+    return f" · ${cost:.2f}" + (f", {turns} turns" if isinstance(turns, int) else "")
+
+
+def changed_range(repo: Path, base: str, head: str) -> list[tuple[str, str]]:
+    return name_status(repo, base, head)
+
+
+def write_overnight(vault: Path, today: str, block: str) -> Path:
+    f = vault / "daily" / f"{today}.md"
+    if f.is_file():
+        text = f.read_text(encoding="utf-8")
+        if START in text and END in text:
+            # A second run the same day adds its report under the first: both stay, one block.
+            inner = block[len(START):-len(END)].strip("\n")
+            at = text.index(END)
+            text = text[:at].rstrip("\n") + "\n\n---\n\n" + inner + "\n" + text[at:]
+        elif "## Overnight" in text:
+            text = text.replace("## Overnight", "## Overnight\n\n" + block, 1)
+        else:
+            m = FM_RE.match(text)
+            h = re.search(r"^# .+$", text, re.M)
+            at = h.end() if h else (m.end() if m else 0)
+            text = text[:at] + "\n\n## Overnight\n\n" + block + "\n" + text[at:]
+    else:
+        d = dt.date.fromisoformat(today)
+        text = (f"---\ntype: daily\ncreated: {today}\ntags: [daily]\n---\n\n"
+                f"# {d:%A}, {d.day} {d:%B %Y}\n\n## Overnight\n\n{block}\n")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text, encoding="utf-8")
+    return f
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("-h", "--help", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--vault", type=Path, default=Path(os.environ.get("CC_VAULT") or Path.home() / "vault"))
+    ap.add_argument("--max-transcripts", type=int, default=6)
+    ap.add_argument("--max-captures", type=int, default=12)
+    ap.add_argument("--max-hubs", type=int, default=4)
+    ap.add_argument("--timeout", type=int, default=90)
+    ap.add_argument("--no-route", action="store_true")
+    ap.add_argument("--quiet", action="store_true")
+    try:
+        a = ap.parse_args()
+    except SystemExit:
+        return 2
+    if a.help:
+        print(__doc__)
+        return 0
+    global QUIET
+    QUIET = a.quiet
+    vault = a.vault.expanduser()
+    if not (vault / ".git").exists():
+        print(f"vault-nightly: no vault at {vault}", file=sys.stderr)
+        return 5
+    claude = shutil.which("claude")
+    if not claude or not shutil.which("git"):
+        print("vault-nightly: needs claude and git on PATH", file=sys.stderr)
+        return 3
+
+    CACHE.mkdir(parents=True, exist_ok=True)
+    lock = open(CACHE / ".lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("vault-nightly: another run holds the lock", file=sys.stderr)
+        return 5
+
+    started = dt.datetime.now()
+    today = started.date().isoformat()
+    if not a.dry_run and not a.no_route:
+        run([str(BIN / "transcripts-sync")])
+    ts, cs, left = find_work(vault, a.max_transcripts, a.max_captures)
+    hubs = find_hubs(vault, a.max_hubs if shutil.which("gh") else 0)
+    bs = brains()
+    names = dict(bs)
+    if a.dry_run:
+        print(run_md(today, ts, cs, left, bs, hubs))
+        print(f"vault-nightly: dry run — {len(ts)} transcript(s), {len(cs)} capture(s), {len(hubs)} hub(s), "
+              f"{len(left)} left")
+        return 0
+    if not ts and not cs and not hubs:
+        log("nothing in the inbox, no hubs to write")
+        return 0
+    log(f"work: {len(ts)} transcript(s), {len(cs)} capture(s), {len(hubs)} hub(s), {len(left)} left for later")
+
+    r = run([str(BIN / "vault-lint"), "--vault", str(vault)])
+    if r.returncode != 0:
+        tg("vault-nightly: skipped — vault-lint already fails on ~/vault; run vault-lint")
+        log("vault-lint fails before the run:\n" + r.stdout[-1500:])
+        return 1
+
+    if not a.no_route:
+        sync_tasks(vault)
+    stamp = f"{started:%Y%m%d-%H%M%S}-{os.getpid()}"
+    rundir = CACHE / stamp
+    wt, branch = rundir / "vault", f"nightly/{stamp}"
+    rundir.mkdir(parents=True)
+    base = git(vault, "rev-parse", "HEAD").stdout.strip()
+    r = git(vault, "worktree", "add", "-q", "-b", branch, str(wt), base)
+    if r.returncode != 0:
+        log(f"worktree add failed: {r.stderr.strip()}")
+        return 1
+    (wt / ".nightly").mkdir()
+    snapped = []
+    for h in hubs:
+        r = run([str(BIN / "project-import"), h["repo"], "--vault", str(wt)])
+        if r.returncode == 0:
+            snapped.append(h)
+        else:
+            log(f"project-import {h['repo']} failed: {(r.stderr or r.stdout).strip()[:200]}")
+    hubs = snapped
+    if hubs and git(wt, "status", "--porcelain", "--", "sources/repos").stdout.strip():
+        git(wt, "add", "--", "sources/repos")
+        git(wt, "commit", "-q", "-m", f"projects: snapshots of {len(hubs)} repo(s) for tonight's hubs")
+    (wt / ".nightly" / "run.md").write_text(run_md(today, ts, cs, left, bs, hubs), encoding="utf-8")
+    (wt / ".nightly" / "tasks.jsonl").write_text("", encoding="utf-8")
+    exclude = Path(git(vault, "rev-parse", "--git-common-dir").stdout.strip())
+    exclude = (vault / exclude if not exclude.is_absolute() else exclude) / "info" / "exclude"
+    if "/.nightly/" not in (exclude.read_text() if exclude.exists() else ""):
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open("a") as fh:
+            fh.write("\n/.nightly/\n")
+
+    log(f"claude -p in {wt}")
+    # bin/ first: launchd's PATH lacks it, and vault-lint and gcal are called by name (--allowedTools).
+    env = {**os.environ, "CC_VAULT": str(wt), "PATH": f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}"}
+    prompt = ("/inbox nightly\n\nYou are the vault's unattended night shift. The vault is the current directory "
+              "(a git worktree); never read or write ~/vault itself. Start by reading .nightly/run.md.")
+    try:
+        cr = run([claude, "-p", prompt, "--output-format", "json", "--permission-mode", "dontAsk",
+                  "--allowedTools", ALLOWED_TOOLS, "--no-session-persistence"],
+                 cwd=wt, env=env, timeout=a.timeout * 60)
+        (rundir / "claude.json").write_text(cr.stdout or cr.stderr, encoding="utf-8")
+        out = json.loads(cr.stdout) if cr.stdout.strip().startswith("{") else {}
+        report = str(out.get("result", "")).strip()
+        cost, turns = out.get("total_cost_usd"), out.get("num_turns")
+        failed = cr.returncode != 0 or out.get("is_error")
+    except subprocess.TimeoutExpired:
+        report, failed, cost, turns = "", True, None, None
+        log(f"claude timed out after {a.timeout} min")
+    if failed:
+        tg(f"vault-nightly: claude failed or timed out; ~/vault untouched. Worktree kept: {wt}")
+        return 1
+
+    problems = gate(wt, base)
+    if problems:
+        tg(f"vault-nightly: gate failed, ~/vault untouched — {problems[0][:200]}. Worktree kept: {wt}")
+        log("gate failed:\n  " + "\n  ".join(problems))
+        return 1
+    head = git(wt, "rev-parse", "HEAD").stdout.strip()
+    good, bad = read_tasks(wt, names)
+    shutil.copy(wt / ".nightly" / "tasks.jsonl", rundir / "tasks.jsonl")
+
+    # Catch ~/vault up with its remote first, then merge: the shas in ## Overnight are the ones that land,
+    # and the push after it never rebases them.
+    if not a.no_route and git(vault, "remote").stdout.strip():
+        git(vault, "pull", "-q", "--rebase", "--autostash")
+    if head != base:
+        r = git(vault, "merge", "-q", "--no-edit", branch)
+        if r.returncode != 0:
+            git(vault, "merge", "--abort")
+            tg(f"vault-nightly: merge into ~/vault failed; nothing landed. Branch {branch} kept")
+            log(f"merge failed: {(r.stdout + r.stderr).strip()}")
+            return 1
+    routed = (["(trial, not added) " + f"`{t['brain']}`: {t['task']}" for t in good] if a.no_route
+              else apply_tasks(good, names))
+
+    summary = {"t": len(ts), "c": len(cs), "h": len(hubs), "tasks": routed, "bad": bad, "left": len(left), "report": report,
+               "cost": cost, "turns": turns}
+    f = write_overnight(vault, today, overnight_block(vault, base, head, started, summary))
+    rel = str(f.relative_to(vault))
+    git(vault, "add", "--", rel)
+    git(vault, "commit", "-q", "-m", f"nightly: overnight report {today}", "--", rel)
+    if not a.no_route:  # a trial runs on a clone whose origin is ~/vault: never push it
+        if git(vault, "remote").stdout.strip():
+            git(vault, "pull", "-q", "--no-rebase", "--no-edit")
+            git(vault, "push", "-q")
+        sync_tasks(vault)
+    git(vault, "worktree", "remove", "--force", str(wt))
+    git(vault, "branch", "-q", "-D", branch)
+
+    n_tasks = len(good)
+    tg(f"vault-nightly: {len(ts)} transcript(s), {len(cs)} capture(s) filed, {len(hubs)} hub(s); "
+       f"{n_tasks} task(s) routed"
+       + (f"; {len(bad)} not routed" if bad else "") + (f"; {len(left)} left" if left else "")
+       + f" — daily/{today}.md ## Overnight")
+    log("done")
+    return 0
+
+
+if __name__ == "__main__":
+    cc.run_main(main)

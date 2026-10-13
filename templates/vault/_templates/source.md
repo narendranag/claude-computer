@@ -1,15 +1,10 @@
 ---
 type: source
 created: <% tp.date.now("YYYY-MM-DD") %>
-tags: []
-source: ""
-people: []
+kind: clip
+url:
+author:
+date:
 ---
-
 # <% tp.file.title %>
 
-## Summary
-
-## Highlights
-
-## My take

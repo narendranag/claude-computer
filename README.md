@@ -272,22 +272,26 @@ Auto mode is only sane with guard rails. These are mine.
 
 ```text
 vault/
-  inbox/       everything lands here — dictation, web clips, quick notes
-  daily/       one note per day, drafted from tasks
-  notes/       flat. atomic ideas, meetings, decisions. no subfolders
-  people/      one note per person who keeps coming up
-  projects/    one hub note per brain
-  sources/     articles, feed digests
-    transcripts/   raw transcripts, once processed
-  maps/        maps of content, all tasks, weekly reviews
+  inbox/       everything lands here — dictation, web clips, phone and email, transcripts
+  daily/       one note per day, drafted from tasks          ┐ yours
+  notes/       flat. your own ideas, one per note             ┘
+  sources/     evidence: transcripts, clips, emails, repo snapshots, confirmations
+  memory/      Claude's graph, every fact cited from sources/
+    people/ orgs/ meetings/ decisions/ commitments/ topics/ projects/
+  maps/        all tasks, weekly reviews
+  Home.md      open commitments, recent meetings, people — live Dataview views
   _templates/
 ```
 
+**Two layers.** `notes/` and `daily/` are yours, in your words. `memory/` is Claude's: a graph of people, orgs, meetings, decisions, commitments, topics and projects, built only from evidence in `sources/`, every fact a dated log line that cites its source. The schema — every `type`, its folder, its required properties, the rules — is in the vault's own [`CLAUDE.md`](templates/vault/CLAUDE.md), and [`bin/vault-lint`](bin/vault-lint) checks notes against it: required properties, dates, enums, wikilinks that resolve, cited log lines, duplicate people, a person's dated `ties`. A project's hub is keyed by its GitHub repo, not a checkout: [`bin/project-import`](bin/project-import) snapshots any repo into `sources/repos/` through `gh api`, so a finished project that only survives on GitHub stays in the brain. [`bin/commitments`](bin/commitments) lists what was promised and closes it, with your word as the evidence.
+
+**The night shift.** [`bin/vault-nightly`](bin/vault-nightly) (04:30, on the vault's home machine) files the day's transcripts and captures and writes a few project hubs with `claude -p`, nobody watching. It is fenced: Claude works in a git worktree of the vault, never the vault itself; `--permission-mode dontAsk` with a short list of allowed tools, so anything else is refused rather than asked; tasks for other brains go to a file the script validates and commits; and the result merges only past a gate — `vault-lint` clean, nothing deleted outside `inbox/`, nothing uncommitted. A failed run leaves your vault and its inbox exactly as they were, and tells you. What it did is under `## Overnight` in the next daily note.
+
 **`vault-setup` makes the vault, plugins and all.** The `obsidian` cask is an empty app until something creates the vault and installs what the brain depends on, so [`bin/vault-setup`](bin/vault-setup) does both: `templates/vault/` into `~/vault` as a git repo with the secret scan, then Obsidian Git, Dataview and Templater — looked up by id in [Obsidian's own registry](https://github.com/obsidianmd/obsidian-releases) and taken from each repo's latest release. That is third-party code running with your notes open, so every source URL and version is printed as it is fetched and recorded in `.obsidian/plugins/VERSIONS.md`; the binaries stay out of the vault repo and `vault-setup` restores them on the next machine. Your Obsidian settings are never clobbered — the plugin list is merged, defaults are written only where no file exists. Two steps it cannot do for you, and prints instead: turning off restricted mode the first time Obsidian opens the vault, and installing the **Obsidian Web Clipper** browser extension, where one setting matters — save clips to `inbox/`.
 
-**Properties over folders.** Every note carries `type`, `created`, `tags`, `status`, `people`, `project`, `source`, and Claude enforces the schema when it files. Structure lives in frontmatter, where Dataview can query it, instead of in a folder tree nobody maintains.
+**Properties over folders.** Every note carries `type` and `created`, and each type its own properties (a meeting its `attendees`, a commitment its `from`, `to` and `status`), and Claude enforces the schema when it files. Structure lives in frontmatter, where Dataview can query it, instead of in a folder tree nobody maintains.
 
-**Tasks live with their brain; the vault gets copies.** Every brain owns a `TASKS.md` with `Now / Next / Later / Done`. That file is the source of truth. `bin/tasks-sync` walks every brain and writes read-only copies into the vault: one `maps/tasks.md` with overdue items flagged, and a marker-delimited block in each project's hub note. Ticking a box in Obsidian changes nothing — you change a task by telling the brain that owns it. The rule that makes this safe: **generated and authored content never mix.** Scripts write only between markers or in notes marked `generated`; everything else is yours and no script overwrites it.
+**Tasks live with their brain; the vault gets copies.** Every brain owns a `TASKS.md` with `Now / Next / Later / Done`. That file is the source of truth. `bin/tasks-sync` walks every brain and writes read-only copies into the vault: one `maps/tasks.md` with what needs eyes (Unassigned, overdue, Now), and a marker-delimited block in each project's hub, `memory/projects/<brain>.md`. When a brain's checkout disappears, its block is frozen and the hub listed for `/review` to close. Ticking a box in Obsidian changes nothing — you change a task by telling the brain that owns it. The rule that makes this safe: **generated and authored content never mix.** Scripts write only between markers or in notes marked `generated`; everything else is yours and no script overwrites it.
 
 **The voice pipeline.** [MacParakeet](https://macparakeet.com) transcribes on the machine with NVIDIA's Parakeet model — nothing leaves the Mac. Three routes, by length:
 

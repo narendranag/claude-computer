@@ -1,0 +1,53 @@
+{
+ "status": 200,
+ "headers": {
+  "link": "<https://api.github.com/repositories/1/commits?per_page=1&page=2>; rel=\"next\", <https://api.github.com/repositories/1/commits?per_page=1&page=3>; rel=\"last\""
+ },
+ "body": [
+  {
+   "sha": "1111111111111111111111111111111111111111",
+   "commit": {
+    "author": {
+     "date": "2026-09-30T10:00:00Z"
+    },
+    "message": "feat: ship the widget CLI\n\nlong body"
+   }
+  },
+  {
+   "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "commit": {
+    "author": {
+     "date": "2026-09-29T10:00:00Z"
+    },
+    "message": "vault backup: 2026-09-29 10:00"
+   }
+  },
+  {
+   "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "commit": {
+    "author": {
+     "date": "2026-09-12T10:00:00Z"
+    },
+    "message": "Merge pull request #4 from acme/x"
+   }
+  },
+  {
+   "sha": "cccccccccccccccccccccccccccccccccccccccc",
+   "commit": {
+    "author": {
+     "date": "2026-08-01T10:00:00Z"
+    },
+    "message": "chore: bump deps"
+   }
+  },
+  {
+   "sha": "dddddddddddddddddddddddddddddddddddddddd",
+   "commit": {
+    "author": {
+     "date": "2026-08-01T10:00:00Z"
+    },
+    "message": "fix: widgets no longer wobble"
+   }
+  }
+ ]
+}

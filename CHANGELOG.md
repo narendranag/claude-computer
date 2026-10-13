@@ -6,6 +6,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Migrating an existing vault
+
+The vault's layout changes: `people/` and `projects/` at the root move into `memory/`, beside the new entity folders. Once, on the vault's home machine, with Obsidian closed and the vault committed:
+
+1. **The new files.** Copy `templates/vault/CLAUDE.md` over `~/vault/CLAUDE.md` (carry across any rules of your own), add `Home.md` and the `memory/` folders, and replace `_templates/` with the template's (`transcript-summary.md` is retired: a transcript now becomes a meeting note).
+2. **People.** `git mv people/* memory/people/`, then rewrite the links: `rg -l '\[\[people/' ~/vault | xargs sed -i '' 's/\[\[people\//[[memory\/people\//g'`.
+3. **Projects.** Hubs now live in `memory/projects/`, which `tasks-sync` writes. Move any hub with text of your own there (`git mv projects/<name>.md memory/projects/`, then add `type: project`, `status`, `repo` and `local`), rewrite `[[projects/` links the same way, and delete the rest of `projects/`: those were generated copies. Then `rmdir people projects`.
+4. **Yourself.** `memory/people/<your git user.name as a slug>.md` with `type: person`, `created`, `name` and `me: true`; add `github:` and `git_authors:` lists if you have committed under other accounts or names, so `project-import` counts those commits as yours.
+5. **Check.** `vault-lint` and fix what it reports; `tasks-sync`; commit the vault.
+6. **Projects you no longer have checked out** (optional): `project-import --catalogue --vault ~/vault` lists every repo of yours with a proposed tier; the night shift then writes hubs for the `hub` tier, a few a night.
+7. **The night shift** (optional): `schedule install vault-nightly` on the vault's home machine, and `schedule install daily-note` again so the morning draft keeps `## Overnight`. Try it first on a copy: `vault-nightly --vault <a clone> --no-route --quiet`.
+
+### Added
+
+- **The vault's memory graph.** Two layers: `notes/` and `daily/` are yours; `memory/` is Claude's graph of people, orgs, meetings, decisions, commitments, topics and projects, built only from evidence in `sources/`, every fact a cited log line. The schema is the vault's `CLAUDE.md` (Properties, Rules, Jobs, Projects); `Home.md` has live views of open commitments, recent meetings and people; new `_templates/` for each type. `/transcripts` turns a recording into a meeting note with its people, decisions and commitments; `/inbox` files your own thinking into `notes/` and material from elsewhere into `sources/`.
+- **`bin/vault-lint`** checks notes against that schema — required properties, dates, enums, wikilinks that resolve, cited log lines, duplicate people and orgs, a person's dated `ties`, each script block's markers whole — and must pass before anything lands.
+- **`bin/project-import`** snapshots a GitHub repo into `sources/repos/<repo>.md` through `gh api` (metadata, languages, commits, file tree, README, CLAUDE.md, DECISIONS.md; no clone), and `--catalogue` lists every repo with a proposed tier — hub, catalogue row or skip — by your own commits. Project hubs are keyed by repo and outlive the checkout.
+- **`bin/commitments`** lists open commitments, yours first, and closes or reopens one with your word as the evidence (a dated `sources/confirmations/` note).
+- **`bin/vault-nightly`**, the night shift (`schedule install vault-nightly`, 04:30): `claude -p '/inbox nightly'` files transcripts and captures and writes a few project hubs, in a git worktree of the vault, with `--permission-mode dontAsk` and a short tool list; it lands only past a gate (`vault-lint` clean, nothing deleted outside `inbox/`, nothing uncommitted), routes tasks to other brains through a file it validates, and reports under `## Overnight` in the next daily note. A failed run leaves the vault untouched and says so.
+- `tests/vault-lint.sh`, `tests/project-import.sh`, `tests/tasks-sync.sh`, `tests/vault-nightly.sh` and `tests/commitments.sh` run offline in CI (fixtures, recorded GitHub responses, a stand-in `claude`).
+
+### Changed
+
+- **`tasks-sync` writes hubs in `memory/projects/`** (a hub for every brain with a GitHub remote, created if missing), and `maps/tasks.md` shows only what needs eyes: Unassigned, overdue, Now, and one line per brain. A hub whose checkout has gone gets its Tasks block frozen and is listed under "Hubs to close" for `/review`; a damaged block heals on the next run.
+- `/archive` and `/graduate` close or update the project's hub (a fresh snapshot, `status`, `ended`, the Tasks block frozen); `/today` keeps the night shift's `## Overnight`; `schedule`'s daily note keeps it too.
+
 ## [0.6.0] — 2026-10-13
 
 ### Migrating from 0.5

@@ -1,0 +1,22 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": {
+  "full_name": "acme/stub",
+  "html_url": "https://github.com/acme/stub",
+  "default_branch": "main",
+  "visibility": "private",
+  "private": true,
+  "fork": false,
+  "archived": false,
+  "description": null,
+  "created_at": "2025-01-05T09:00:00Z",
+  "pushed_at": "2026-09-30T18:00:00Z",
+  "topics": [],
+  "size": 120,
+  "stargazers_count": 0,
+  "owner": {
+   "login": "acme"
+  }
+ }
+}

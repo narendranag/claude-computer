@@ -1,0 +1,25 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": {
+  "full_name": "acme/widget",
+  "html_url": "https://github.com/acme/widget",
+  "default_branch": "main",
+  "visibility": "public",
+  "private": false,
+  "fork": false,
+  "archived": false,
+  "description": "Widgets, | piped",
+  "created_at": "2025-01-05T09:00:00Z",
+  "pushed_at": "2026-09-30T18:00:00Z",
+  "topics": [
+   "cli",
+   "widgets"
+  ],
+  "size": 2048,
+  "stargazers_count": 3,
+  "owner": {
+   "login": "acme"
+  }
+ }
+}

@@ -1,11 +1,15 @@
 ---
 type: person
 created: <% tp.date.now("YYYY-MM-DD") %>
-tags: [person]
+name: <% tp.file.title %>
+aliases: []
+relationship:
+ties: []
+sources: []
 ---
-
 # <% tp.file.title %>
 
-**Context:** how we know each other
+<Who they are, in 2–5 lines.>
 
-## Notes
+## Log
+- <% tp.date.now("YYYY-MM-DD") %> — <what happened>. ([[<source>]])

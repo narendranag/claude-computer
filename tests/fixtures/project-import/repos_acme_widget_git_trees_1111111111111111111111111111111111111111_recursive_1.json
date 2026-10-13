@@ -1,0 +1,53 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": {
+  "truncated": false,
+  "tree": [
+   {
+    "path": "README.md",
+    "type": "blob"
+   },
+   {
+    "path": "CLAUDE.md",
+    "type": "blob"
+   },
+   {
+    "path": "src",
+    "type": "tree"
+   },
+   {
+    "path": "src/widget",
+    "type": "tree"
+   },
+   {
+    "path": "src/widget/__init__.py",
+    "type": "blob"
+   },
+   {
+    "path": "docs",
+    "type": "tree"
+   },
+   {
+    "path": "docs/DECISIONS.md",
+    "type": "blob"
+   },
+   {
+    "path": "docs/01-design.md",
+    "type": "blob"
+   },
+   {
+    "path": "docs/adr",
+    "type": "tree"
+   },
+   {
+    "path": "docs/adr/0001-cli.md",
+    "type": "blob"
+   },
+   {
+    "path": "pyproject.toml",
+    "type": "blob"
+   }
+  ]
+ }
+}

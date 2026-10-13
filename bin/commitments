@@ -1,0 +1,258 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""commitments — the vault's commitments: list them, and close or reopen one.
+
+A commitment is a note in <vault>/memory/commitments/ (the vault's CLAUDE.md, "Properties"): `from`, `to`,
+`status` (open · done · dropped), `made_in`, optional `due`, `done_on`, `task`. This script is the one place
+that changes a commitment's status: by hand, from the nightly job, or from any page with tick buttons.
+
+Usage:
+  commitments list [--all] [--json]       open commitments (--all: every one), the owner's first. The
+                                          owner is the person note with `me: true`, else the one named
+                                          after `git config user.name`
+  commitments set <id> done|dropped|open [--via NAME] [--no-commit]
+                                          change one: status and done_on, a dated `## Log` bullet citing
+                                          sources/confirmations/<date>-<via>.md (created or appended:
+                                          the owner's word is the evidence), then a vault commit
+
+  --vault DIR   the vault (default $CC_VAULT, else ~/vault)
+  --via NAME    where the owner said so, for the confirmation note (default: cli)
+
+<id> is the note's file name without .md. `list --json` gives, per commitment: id, title, status, mine (the
+owner owes it), from, to (names), due, done_on, overdue, meeting, meeting_date, task.
+
+Exit codes: 0 ok · 1 failed (a git commit) · 2 usage, or no such commitment · 5 no vault
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,150}$")
+STATUSES = ("open", "done", "dropped")
+FM_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+LINK_RE = re.compile(r"\[\[([^\]|#]+)")
+
+
+def front(text: str) -> dict[str, str]:
+    """Scalar properties only — enough for commitments, people and orgs; quotes and links stripped."""
+    m = FM_RE.match(text)
+    out: dict[str, str] = {}
+    for line in (m.group(1).splitlines() if m else []):
+        k, sep, v = line.partition(":")
+        if sep and not line.startswith((" ", "-")):
+            out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def link_target(v: str) -> str:
+    m = LINK_RE.search(v or "")
+    return m.group(1).strip() if m else ""
+
+
+def yq(s: str) -> str:
+    """A YAML double-quoted scalar."""
+    return json.dumps(s, ensure_ascii=False)
+
+
+def title_of(text: str, fallback: str) -> str:
+    m = re.search(r"^# (.+)$", text, re.M)
+    return m.group(1).strip() if m else fallback
+
+
+def find_owner(root: Path) -> str:
+    """The owner's own person note, as a link target: the one with `me: true`, else the note named after
+    `git config user.name` (the vault's CLAUDE.md, Properties → person); "" when neither exists."""
+    people = root / "memory" / "people"
+    for f in sorted(people.glob("*.md")) if people.is_dir() else []:
+        if front(f.read_text(encoding="utf-8")).get("me", "").lower() == "true":
+            return f"memory/people/{f.stem}"
+    r = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, check=False)
+    stem = re.sub(r"[^a-z0-9]+", "-", r.stdout.strip().lower()).strip("-")
+    return f"memory/people/{stem}" if stem and (people / f"{stem}.md").is_file() else ""
+
+
+class Vault:
+    def __init__(self, root: Path):
+        self.root = root
+        self.dir = root / "memory" / "commitments"
+        self._names: dict[str, str] = {}
+        self.owner = find_owner(root)
+        self.owner_name = (self.name(self.owner) if self.owner else "") or "The owner"
+
+    def name(self, target: str) -> str:
+        if not target:
+            return ""
+        if target not in self._names:
+            f = self.root / f"{target}.md"
+            n = ""
+            if f.is_file():
+                fm = front(f.read_text(encoding="utf-8"))
+                n = fm.get("name", "")
+            self._names[target] = n or target.rsplit("/", 1)[-1]
+        return self._names[target]
+
+    def meeting(self, target: str) -> tuple[str, str]:
+        f = self.root / f"{target}.md"
+        if not target or not f.is_file():
+            return "", ""
+        text = f.read_text(encoding="utf-8")
+        t = re.sub(r"\s+—\s+\d{4}-\d{2}-\d{2}$", "", title_of(text, target.rsplit("/", 1)[-1]))
+        return t, front(text).get("date", "")
+
+    def read(self, f: Path, today: dt.date) -> dict:
+        text = f.read_text(encoding="utf-8")
+        fm = front(text)
+        frm, to = link_target(fm.get("from", "")), link_target(fm.get("to", ""))
+        meeting, mdate = self.meeting(link_target(fm.get("made_in", "")))
+        status = fm.get("status", "open")
+        due = fm.get("due", "")
+        return {
+            "id": f.stem, "title": title_of(text, f.stem), "status": status, "mine": bool(self.owner) and frm == self.owner,
+            "from": self.name(frm), "to": self.name(to), "due": due, "done_on": fm.get("done_on", ""),
+            "overdue": status == "open" and bool(due) and due < today.isoformat(),
+            "meeting": meeting, "meeting_date": mdate, "task": fm.get("task", ""),
+        }
+
+    def all(self, today: dt.date) -> list[dict]:
+        if not self.dir.is_dir():
+            return []
+        return [self.read(f, today) for f in sorted(self.dir.glob("*.md"))]
+
+
+def sort_key(c: dict) -> tuple:
+    return (not c["mine"], c["status"] != "open", c["due"] or "9999", c["meeting_date"], c["id"])
+
+
+def cmd_list(v: Vault, show_all: bool, as_json: bool) -> int:
+    items = sorted((c for c in v.all(dt.date.today()) if show_all or c["status"] == "open"), key=sort_key)
+    if as_json:
+        print(json.dumps(items, ensure_ascii=False, indent=1))
+        return 0
+    for c in items:
+        who = f"→ {c['to']}" if c["mine"] else f"{c['from']} →"
+        when = f"due {c['due']}" + (" LATE" if c["overdue"] else "") if c["due"] else f"since {c['meeting_date']}"
+        mark = {"open": " ", "done": "x", "dropped": "-"}.get(c["status"], "?")
+        print(f"[{mark}] {c['title']}  ({who}; {when})  {c['id']}")
+    mine = sum(c["mine"] and c["status"] == "open" for c in items)
+    print(f"commitments: {sum(c['status'] == 'open' for c in items)} open, {mine} of them yours")
+    return 0
+
+
+def confirmation(v: Vault, via: str, today: str, status: str, title: str) -> str:
+    """Append to (or create) the day's confirmation note for this channel; return its link target."""
+    rel = f"sources/confirmations/{today}-{via}"
+    f = v.root / f"{rel}.md"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    if not f.exists():
+        f.write_text(
+            "---\n"
+            f"type: source\ncreated: {today}\nkind: confirmation\ndate: {today}\nauthor: {yq(v.owner_name)}\n"
+            f'summary: {yq(f"Commitments {v.owner_name} closed or reopened from the {via} on {today}")}\n'
+            "---\n"
+            f"# Commitments confirmed from the {via} — {today}\n\n"
+            f"{v.owner_name}'s own word is the evidence for each line below.\n\n",
+            encoding="utf-8")
+    with f.open("a", encoding="utf-8") as fh:
+        fh.write(f"- {dt.datetime.now().strftime('%H:%M')} — {status}: {title}\n")
+    return rel
+
+
+def git(v: Vault, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(v.root), *args], capture_output=True, text=True, check=False)
+
+
+def cmd_set(v: Vault, cid: str, status: str, via: str, commit: bool) -> int:
+    if not ID_RE.match(cid) or status not in STATUSES or not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", via):
+        print("commitments: usage: set <id> done|dropped|open [--via NAME]", file=sys.stderr)
+        return 2
+    f = v.dir / f"{cid}.md"
+    if not f.is_file():
+        print(f"commitments: no commitment {cid}", file=sys.stderr)
+        return 2
+    today = dt.date.today().isoformat()
+    text = f.read_text(encoding="utf-8")
+    c = v.read(f, dt.date.today())
+    if c["status"] == status:
+        print(f"commitments: {cid} is already {status}")
+        return 0
+    m = FM_RE.match(text)
+    head, body = m.group(1), text[m.end():]
+    lines = [ln for ln in head.splitlines() if not ln.startswith(("status:", "done_on:"))]
+    i = next((k for k, ln in enumerate(lines) if ln.startswith("made_in:")), len(lines) - 1)
+    new = [f"status: {status}"] + ([f"done_on: {today}"] if status != "open" else [])
+    lines[i + 1:i + 1] = new
+    rel = confirmation(v, via, today, status, c["title"])
+    who = v.owner_name
+    said = {"done": f"{who} confirmed it done.", "dropped": f"{who} dropped it: no longer needed.",
+            "open": f"{who} reopened it."}[status]
+    bullet = f"- {today} — {said} ([[{rel}]])\n"
+    if "\n## Log\n" in body:
+        body = body.rstrip("\n") + "\n" + bullet
+    else:
+        body = body.rstrip("\n") + "\n\n## Log\n" + bullet
+    tmp = f.with_suffix(".md.tmp")
+    tmp.write_text("---\n" + "\n".join(lines) + "\n---\n" + body, encoding="utf-8")
+    tmp.replace(f)
+    print(f"commitments: {cid} → {status}")
+    if not commit:
+        return 0
+    paths = [str(f.relative_to(v.root)), f"{rel}.md"]
+    for attempt in range(3):  # Obsidian Git may hold the index for a moment
+        add = git(v, "add", "--", *paths)
+        r = git(v, "commit", "-q", "-m", f"commitments: {cid} {status}", "--", *paths) if add.returncode == 0 else add
+        if r.returncode == 0:
+            return 0
+        if "index.lock" not in (r.stderr or ""):
+            break
+        time.sleep(1.5 * (attempt + 1))
+    print(f"commitments: changed, but the vault commit failed: {(r.stderr or r.stdout).strip()[:200]}", file=sys.stderr)
+    return 1
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("-h", "--help", action="store_true")
+    ap.add_argument("cmd", nargs="?")
+    ap.add_argument("args", nargs="*")
+    ap.add_argument("--vault", type=Path, default=Path(os.environ.get("CC_VAULT") or Path.home() / "vault"))
+    ap.add_argument("--all", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--via", default="cli")
+    ap.add_argument("--no-commit", action="store_true")
+    try:
+        a = ap.parse_args()
+    except SystemExit:
+        return 2
+    if a.help or not a.cmd:
+        print(__doc__)
+        return 0 if a.help else 2
+    v = Vault(a.vault.expanduser())
+    if not v.root.is_dir():
+        print(f"commitments: no vault at {v.root}", file=sys.stderr)
+        return 5
+    if a.cmd == "list" and not a.args:
+        return cmd_list(v, a.all, a.json)
+    if a.cmd == "set" and len(a.args) == 2:
+        return cmd_set(v, a.args[0], a.args[1], a.via, not a.no_commit)
+    print("commitments: usage: commitments list [--all] [--json] | set <id> done|dropped|open", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as e:
+        print(f"commitments: failed: {type(e).__name__}: {e}", file=sys.stderr)
+        sys.exit(1)

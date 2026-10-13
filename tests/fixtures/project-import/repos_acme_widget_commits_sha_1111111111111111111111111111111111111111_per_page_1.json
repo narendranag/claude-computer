@@ -1,0 +1,17 @@
+{
+ "status": 200,
+ "headers": {
+  "link": "<https://api.github.com/repositories/1/commits?per_page=1&page=2>; rel=\"next\", <https://api.github.com/repositories/1/commits?per_page=1&page=250>; rel=\"last\""
+ },
+ "body": [
+  {
+   "sha": "1111111111111111111111111111111111111111",
+   "commit": {
+    "author": {
+     "date": "2026-09-30T10:00:00Z"
+    },
+    "message": "feat: ship the widget CLI"
+   }
+  }
+ ]
+}
