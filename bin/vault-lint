@@ -1,0 +1,478 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml>=6.0"]
+# ///
+"""vault-lint — check vault notes against the schema in the vault's CLAUDE.md ("Properties", "Rules").
+
+Checks every Markdown note under memory/ and sources/repos/, or only the PATHs given (files or folders):
+
+  frontmatter   the note opens with a YAML front matter block that parses to a mapping
+  type          `type` is one of the schema's types
+  required      the properties its type requires are present and not empty
+  enum          relationship (person), kind (org, source), status (decision, commitment, project)
+  date          date properties are YYYY-MM-DD and real dates
+  folder        the note sits in its type's folder (meetings in memory/meetings/YYYY/)
+  link          every [[wikilink]] in a property resolves: vault-relative path with or without .md,
+                or a bare name that matches a file anywhere in the vault, as Obsidian resolves them
+  link-format   properties that hold links (people, orgs, sources, attendees, transcript, …) hold wikilinks
+  filename      kebab-case; project hubs and repo snapshots may use the repo's own name, and transcripts
+                keep the YYYY-MM-DD_<slug> names transcripts-sync gives them
+  duplicate     two person notes, or two org notes, share a name or alias (case-insensitive)
+  log-citation  Rule 3: in memory/, each bullet under `## Log` ends with its source, `([[…]])`, and it resolves
+  ties          a person's `ties` is a list of {relationship, org, since, until, source}: relationship one of
+                the allowed values, org a link to an org note, since/until dates in order, source a link or a list of links
+  markers       Rule 1: each script's `<!-- <script>:start -->` / `<!-- <script>:end -->` pair is whole, in
+                order, and appears once (a broken pair makes the script append a second block)
+
+Notes with `generated:` are checked for their properties only (the body belongs to a script).
+`_templates/` and dot-folders are never checked.
+
+Usage:
+  vault-lint [--vault DIR] [--json] [PATH...]
+
+  --vault DIR  the vault (default: $CC_VAULT, else ~/vault); links resolve against it
+  --json       {"checked": n, "errors": [{path, line, rule, message}], "by_rule": {...}} on stdout
+  PATH         check these instead of memory/ and sources/repos/ (relative to the current folder,
+               else to the vault)
+
+Output: `path:line: rule: message`, one per finding, then a summary line.
+Exit codes: 0 clean · 1 errors found · 2 usage · 5 vault missing
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import sys
+from collections import Counter
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import cc  # noqa: E402
+
+import yaml  # noqa: E402
+
+
+
+class Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):  # type: ignore[misc]
+    """Safe loader that keeps dates as the text written, so a bad date is a finding, not a crash."""
+
+
+Loader.add_constructor("tag:yaml.org,2002:timestamp", lambda loader, node: loader.construct_scalar(node))
+
+# The Properties table of the vault's CLAUDE.md.
+REQUIRED = {
+    "note": ["created"],
+    "daily": ["created"],
+    "person": ["created", "name"],
+    "org": ["created", "name"],
+    "meeting": ["created", "date", "attendees", "transcript"],
+    "decision": ["created", "date", "status", "sources"],
+    "commitment": ["created", "from", "to", "status", "made_in"],
+    "topic": ["created", "name"],
+    "project": ["created", "status", "repo"],
+    "source": ["created", "kind"],
+    "transcript": [],  # "as transcripts-sync writes it": that script writes `date`, not `created`
+    "map": ["created"],
+}
+RELATIONSHIPS = ("client", "colleague", "partner", "advisee", "advisor", "investor", "vendor", "friend", "family", "other")
+TIE_KEYS = ("relationship", "org", "since", "until", "source")
+ENUMS = {
+    ("person", "relationship"): RELATIONSHIPS,
+    ("org", "kind"): ("client", "company", "investor", "vendor", "community", "other"),
+    ("decision", "status"): ("made", "superseded", "reversed"),
+    ("commitment", "status"): ("open", "done", "dropped"),
+    ("project", "status"): ("idea", "active", "paused", "done", "archived", "abandoned"),
+    ("source", "kind"): ("transcript", "clip", "report", "repo", "email", "feed", "book", "paper", "confirmation"),
+}
+FOLDERS = {
+    "note": re.compile(r"^notes/[^/]+$"),
+    "daily": re.compile(r"^daily/[^/]+$"),
+    "person": re.compile(r"^memory/people/[^/]+$"),
+    "org": re.compile(r"^memory/orgs/[^/]+$"),
+    "meeting": re.compile(r"^memory/meetings/\d{4}/[^/]+$"),
+    "decision": re.compile(r"^memory/decisions/[^/]+$"),
+    "commitment": re.compile(r"^memory/commitments/[^/]+$"),
+    "topic": re.compile(r"^memory/topics/[^/]+$"),
+    "project": re.compile(r"^memory/projects/[^/]+$"),
+    "source": re.compile(r"^sources/"),
+    "transcript": re.compile(r"^(inbox|sources)/transcripts/[^/]+$"),
+    # maps/, plus a generated `_name.md` inside memory/ (project-import's memory/projects/_catalogue.md)
+    "map": re.compile(r"^(maps/|memory/[^/]+/_[^/]+$)"),
+}
+FOLDER_HINT = {
+    "note": "notes/ (flat)", "daily": "daily/", "person": "memory/people/", "org": "memory/orgs/",
+    "meeting": "memory/meetings/YYYY/", "decision": "memory/decisions/", "commitment": "memory/commitments/",
+    "topic": "memory/topics/", "project": "memory/projects/", "source": "sources/",
+    "transcript": "inbox/transcripts/ or sources/transcripts/", "map": "maps/",
+}
+DATE_PROPS = ("created", "updated", "date", "last_contact", "due", "done_on", "started", "ended", "created_at", "pushed_at")
+LINK_PROPS = ("people", "orgs", "projects", "topics", "sources", "attendees", "transcript", "decisions", "commitments",
+              "decided_by", "made_in", "supersedes", "superseded_by", "from", "to", "broader", "related", "meeting",
+              "snapshot")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+WIKILINK_RE = re.compile(r"!?\[\[([^\]\n]+?)\]\]")
+KEBAB_RE = re.compile(r"^_?[a-z0-9]+(-[a-z0-9]+)*$")
+REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+CITED_RE = re.compile(r"\(\s*\[\[[^\]\n]+\]\]\s*\)\s*$")
+BULLET_RE = re.compile(r"^[-*+]\s")  # top-level bullets; a nested one continues its parent
+SKIP_DIRS = {"_templates", "node_modules"}
+
+
+@dataclass
+class Finding:
+    path: str
+    line: int
+    rule: str
+    message: str
+
+
+class Vault:
+    """Every file in the vault, indexed the ways Obsidian resolves a link."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.paths: set[str] = set()  # vault-relative, lower-case, with extension
+        self.names: set[str] = set()  # basename lower-case, with and without .md
+        for d, dirs, files in os.walk(root):
+            dirs[:] = [x for x in dirs if not x.startswith(".")]
+            rel = os.path.relpath(d, root)
+            for f in files:
+                if f.startswith("."):
+                    continue
+                p = f if rel == "." else f"{rel}/{f}"
+                self.paths.add(p.lower())
+                self.names.add(f.lower())
+                if f.lower().endswith(".md"):
+                    self.names.add(f[:-3].lower())
+
+    def resolves(self, target: str) -> bool:
+        t = target.split("|", 1)[0].split("#", 1)[0].strip().strip("/").lower()
+        if not t:
+            return True  # [[#heading]] is a link within the note
+        if "/" in t:
+            return t in self.paths or f"{t}.md" in self.paths
+        return t in self.names or f"{t}.md" in self.names
+
+
+MARKER_RE = re.compile(r"<!-- ([\w-]+):(start|end)\b")
+ORPHAN_RE = re.compile(r"^\s*— generated\b.*-->\s*$")
+
+
+def rel(path: Path, root: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def split_front_matter(text: str) -> tuple[str | None, int]:
+    """(YAML text, line number of the closing ---), or (None, 0) without a front matter block."""
+    lines = text.split("\n")
+    if not lines or lines[0].rstrip() != "---":
+        return None, 0
+    for i in range(1, len(lines)):
+        if lines[i].rstrip() in ("---", "..."):
+            return "\n".join(lines[1:i]), i + 1
+    return None, 0
+
+
+def key_lines(yaml_text: str) -> dict[str, int]:
+    out = {}
+    for i, line in enumerate(yaml_text.split("\n"), start=2):
+        m = re.match(r"^([A-Za-z_][\w-]*)\s*:", line)
+        if m and m.group(1) not in out:
+            out[m.group(1)] = i
+    return out
+
+
+def empty(v) -> bool:
+    return v is None or v == "" or v == [] or v == {}
+
+
+def strings(v) -> list[str]:
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, list):
+        return [x for item in v for x in strings(item)]
+    if isinstance(v, dict):
+        return [x for item in v.values() for x in strings(item)]
+    return []
+
+
+def identities(fm: dict) -> list[str]:
+    out = []
+    for v in [fm.get("name")] + (fm.get("aliases") if isinstance(fm.get("aliases"), list) else [fm.get("aliases")]):
+        if isinstance(v, str) and v.strip():
+            out.append(re.sub(r"\s+", " ", v.strip().lower()))
+    return list(dict.fromkeys(out))
+
+
+def check_ties(ties, line: int, err) -> None:
+    """A person's ties: one entry per way the owner engages with them (role, through which org, when)."""
+    if not isinstance(ties, list):
+        err(line, "ties", "ties is not a list")
+        return
+    for n, tie in enumerate(ties, start=1):
+        if not isinstance(tie, dict):
+            err(line, "ties", f"tie {n} is not a mapping")
+            continue
+        for k in tie:
+            if k not in TIE_KEYS:
+                err(line, "ties", f"tie {n}: unknown key {k!r} (one of: {', '.join(TIE_KEYS)})")
+        rel_ = tie.get("relationship")
+        if empty(rel_):
+            err(line, "ties", f"tie {n} needs `relationship`")
+        elif rel_ not in RELATIONSHIPS:
+            err(line, "ties", f"tie {n}: relationship {rel_!r} is not one of {' · '.join(RELATIONSHIPS)}")
+        src = tie.get("source")
+        if empty(src):
+            err(line, "ties", f"tie {n} needs `source`")
+        else:
+            for s in src if isinstance(src, list) else [src]:
+                if not (isinstance(s, str) and WIKILINK_RE.fullmatch(s.strip())):
+                    err(line, "ties", f"tie {n}: source {s!r} is not a [[wikilink]]")
+        org = tie.get("org")
+        if not empty(org):
+            m = WIKILINK_RE.fullmatch(org.strip()) if isinstance(org, str) else None
+            if not m or not m.group(1).split("|", 1)[0].startswith("memory/orgs/"):
+                err(line, "ties", f"tie {n}: org {org!r} is not a [[memory/orgs/…]] link")
+        dates = {}
+        for k in ("since", "until"):
+            v = tie.get(k)
+            if empty(v):
+                continue
+            try:
+                ok = isinstance(v, str) and bool(DATE_RE.match(v)) and bool(dt.date.fromisoformat(v))
+            except ValueError:
+                ok = False
+            if ok:
+                dates[k] = v
+            else:
+                err(line, "ties", f"tie {n}: {k}: {v!r} is not a YYYY-MM-DD date")
+        if len(dates) == 2 and dates["since"] > dates["until"]:
+            err(line, "ties", f"tie {n}: since {dates['since']} is after until {dates['until']}")
+
+
+def check_note(path: Path, shown: str, vrel: str | None, vault: Vault, out: list[Finding]) -> tuple[str | None, dict]:
+    """Lint one note. Returns its type and front matter (for the duplicate check)."""
+    def err(line: int, rule: str, msg: str) -> None:
+        out.append(Finding(shown, line, rule, msg))
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        err(1, "frontmatter", f"unreadable: {e}")
+        return None, {}
+    raw, end = split_front_matter(text)
+    if raw is None:
+        err(1, "frontmatter", "no front matter block")
+        return None, {}
+    try:
+        fm = yaml.load(raw, Loader=Loader)
+    except yaml.YAMLError as e:
+        # libyaml (CSafeLoader, bundled in Linux wheels) words errors differently; report the pure parser's, the same everywhere.
+        problem = e
+        try:
+            yaml.load(raw, Loader=yaml.SafeLoader)
+        except yaml.YAMLError as pure:
+            problem = pure
+        mark = getattr(problem, "problem_mark", None)
+        err(2 + (mark.line if mark else 0), "frontmatter", f"invalid YAML: {getattr(problem, 'problem', None) or problem}")
+        return None, {}
+    if fm is None:
+        fm = {}
+    if not isinstance(fm, dict):
+        err(2, "frontmatter", "front matter is not a mapping")
+        return None, {}
+    lines = key_lines(raw)
+    at = lambda k: lines.get(k, 1)  # noqa: E731
+
+    typ = fm.get("type")
+    if empty(typ):
+        err(1, "required", "missing `type`")
+        return None, fm
+    if not isinstance(typ, str) or typ not in REQUIRED:
+        err(at("type"), "type", f"unknown type {typ!r} (one of: {', '.join(REQUIRED)})")
+        return None, fm
+
+    for k in REQUIRED[typ]:
+        if empty(fm.get(k)):
+            err(at(k) if k in fm else 1, "required", f"{typ} needs `{k}`")
+
+    for (t, k), allowed in ENUMS.items():
+        if t == typ and k in fm and not empty(fm[k]) and fm[k] not in allowed:
+            err(at(k), "enum", f"{k}: {fm[k]!r} is not one of {' · '.join(allowed)}")
+
+    for k in DATE_PROPS:
+        if k not in fm or empty(fm[k]):
+            continue
+        v = fm[k]
+        if not isinstance(v, str):
+            err(at(k), "date", f"{k}: {v!r} is not a YYYY-MM-DD date")
+        else:
+            ok = bool(DATE_RE.match(v))
+            if ok:
+                try:
+                    dt.date.fromisoformat(v)
+                except ValueError:
+                    ok = False
+            if not ok:
+                err(at(k), "date", f"{k}: {v!r} is not a YYYY-MM-DD date")
+
+    if typ == "person" and "ties" in fm:
+        check_ties(fm["ties"], at("ties"), err)
+
+    if vrel is not None and not FOLDERS[typ].match(vrel):
+        err(1, "folder", f"a {typ} belongs in {FOLDER_HINT[typ]}")
+
+    for k, v in fm.items():
+        for s in strings(v):
+            for m in WIKILINK_RE.finditer(s):
+                if not vault.resolves(m.group(1)):
+                    err(at(k), "link", f"{k}: [[{m.group(1)}]] does not resolve")
+        if k in LINK_PROPS and typ != "transcript":
+            for s in strings(v):
+                if s.strip() and not WIKILINK_RE.fullmatch(s.strip()):
+                    err(at(k), "link-format", f"{k}: {s!r} is not a [[wikilink]]")
+
+    stem = path.stem
+    repo_named = typ == "project" or (vrel or "").startswith("sources/repos/")
+    if typ != "transcript" and not (KEBAB_RE.match(stem) or (repo_named and REPO_NAME_RE.match(stem))):
+        err(1, "filename", f"{path.name!r} is not a kebab-case slug")
+
+    open_at: dict[str, int] = {}
+    seen: set[str] = set()
+    for i, line in enumerate(text.split("\n"), start=1):
+        for m in MARKER_RE.finditer(line):
+            name, edge = m.group(1), m.group(2)
+            if edge == "start":
+                if name in open_at:
+                    err(i, "markers", f"{name}:start again before {name}:end (line {open_at[name]})")
+                elif name in seen:
+                    err(i, "markers", f"a second {name} block")
+                open_at[name] = i
+                seen.add(name)
+            elif name in open_at:
+                del open_at[name]
+            else:
+                err(i, "markers", f"{name}:end with no {name}:start before it")
+        if ORPHAN_RE.match(line):
+            err(i, "markers", "a marker's tail with no `<!-- <script>:start` before it")
+    for name, i in open_at.items():
+        err(i, "markers", f"{name}:start with no {name}:end")
+
+    if "generated" not in fm and vrel is not None and vrel.startswith("memory/"):
+        in_log = False
+        for i, line in enumerate(text.split("\n")[end:], start=end + 1):
+            if line.startswith("#"):
+                in_log = bool(re.match(r"^##\s+Log\s*$", line))
+                continue
+            if not in_log or not BULLET_RE.match(line):
+                continue
+            if not CITED_RE.search(line):
+                err(i, "log-citation", "log bullet does not end with its source, ([[…]])")
+            else:
+                target = WIKILINK_RE.findall(line)[-1]
+                if not vault.resolves(target):
+                    err(i, "link", f"log source [[{target}]] does not resolve")
+    return typ, fm
+
+
+def collect(targets: list[Path]) -> list[Path]:
+    files: list[Path] = []
+    for t in targets:
+        if t.is_file():
+            files.append(t)
+            continue
+        for d, dirs, fs in os.walk(t):
+            dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x not in SKIP_DIRS)
+            files += [Path(d) / f for f in sorted(fs) if f.endswith(".md") and not f.startswith(".")]
+    return list(dict.fromkeys(files))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("-h", "--help", action="store_true")
+    ap.add_argument("--vault", type=Path)
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("paths", nargs="*", type=Path)
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        return cc.EX_USAGE
+    if args.help:
+        print(__doc__)
+        return cc.EX_OK
+    root = (args.vault or Path(os.environ.get("CC_VAULT") or Path.home() / "vault")).expanduser()
+    if not root.is_dir():
+        raise cc.CCError(cc.EX_CONFIG, f"vault not found at {root}")
+
+    if args.paths:
+        targets = []
+        for p in args.paths:
+            p = p.expanduser()
+            q = p if p.exists() else root / p
+            if not q.exists():
+                raise cc.CCError(cc.EX_USAGE, f"no such file or folder: {p}")
+            targets.append(q)
+    else:
+        targets = [d for d in (root / "memory", root / "sources" / "repos") if d.is_dir()]
+
+    vault = Vault(root)
+    findings: list[Finding] = []
+    checked = 0
+    ids: dict[tuple[str, str], list[str]] = {}
+    seen: set[str] = set()
+    for f in collect(targets):
+        vrel = rel(f, root)
+        shown = vrel if vrel is not None else str(f)
+        typ, fm = check_note(f, shown, vrel, vault, findings)
+        checked += 1
+        seen.add(shown)
+        if typ in ("person", "org"):
+            for ident in identities(fm):
+                ids.setdefault((typ, ident), []).append(shown)
+
+    # Identities of every person and org note in the vault, so a checked note collides with unchecked ones too.
+    for kind, folder in (("person", "memory/people"), ("org", "memory/orgs")):
+        for f in collect([root / folder] if (root / folder).is_dir() else []):
+            shown = rel(f, root) or str(f)
+            if shown in seen:
+                continue
+            raw, _ = split_front_matter(f.read_text(encoding="utf-8", errors="replace"))
+            try:
+                fm = yaml.load(raw, Loader=Loader) if raw is not None else None
+            except yaml.YAMLError:
+                fm = None
+            if isinstance(fm, dict) and fm.get("type") == kind:
+                for ident in identities(fm):
+                    ids.setdefault((kind, ident), []).append(shown)
+    for (kind, ident), where in sorted(ids.items()):
+        where = sorted(set(where))
+        for w in where:
+            if len(where) > 1 and w in seen:
+                others = ", ".join(x for x in where if x != w)
+                findings.append(Finding(w, 1, "duplicate", f"{kind} identity {ident!r} is also {others}"))
+
+    findings.sort(key=lambda x: (x.path, x.line, x.rule, x.message))
+    by_rule = dict(sorted(Counter(x.rule for x in findings).items()))
+    n_files = len({x.path for x in findings})
+    if args.json:
+        json.dump({"checked": checked, "errors": [asdict(x) for x in findings], "by_rule": by_rule}, sys.stdout, indent=2)
+        print()
+    else:
+        for x in findings:
+            print(f"{x.path}:{x.line}: {x.rule}: {x.message}")
+        detail = f" ({', '.join(f'{k} {v}' for k, v in by_rule.items())})" if by_rule else ""
+        print(f"vault-lint: {checked} notes checked, {len(findings)} errors in {n_files} notes{detail}")
+    return cc.EX_FAIL if findings else cc.EX_OK
+
+
+if __name__ == "__main__":
+    cc.run_main(main)

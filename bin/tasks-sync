@@ -6,12 +6,23 @@
 """tasks-sync — collect TASKS.md from every brain into read-only copies in the vault.
 
 A brain is any folder with a CLAUDE.md: the fixed ones (claude-computer, archive, vault, resources,
-library/camera), every folder in clients/, projects/, products/ and personal/, the code repos inside a
+library/camera), every folder in clients/, projects/, products/ and personal/ (not a git worktree), the code repos inside a
 client's folder, and one level into a plain folder that only groups repos. Each brain's TASKS.md is the source of truth;
 this script only reads them and writes generated copies:
 
-  <vault>/maps/tasks.md               every open task by brain, Now first, overdue flagged
-  <vault>/projects/<brain>.md         a marker-delimited "## Tasks" block (hub created if missing)
+  <vault>/maps/tasks.md                  Unassigned, overdue and Now across every brain, then one line
+                                         per brain linking its hub
+  <vault>/memory/projects/<brain>.md     a marker-delimited "## Tasks" block with every open task, put
+                                         above `## Log`. A brain whose checkout has a GitHub remote gets
+                                         a hub if it has none (type: project, status: active, repo,
+                                         local); the rest of the hub is Claude's (the vault's CLAUDE.md).
+                                         Brains with no remote (archive, resources) and the vault itself
+                                         have no hub; their tasks are in maps/tasks.md only.
+
+A hub whose brain has gone (its `local` checkout is missing or has no CLAUDE.md: retired, archived or moved)
+gets its block frozen as /archive does — markers off, `## Tasks` renamed `## Open at close (brain gone
+by <date>)` — and, while its `status` is still idea, active or paused, a line under "Hubs to close" in
+maps/tasks.md, so /review sets `status` and `ended`. A hub with no `local` is never touched.
 
 Task format (shared by every brain):
   ## Now / ## Next / ## Later / ## Done
@@ -31,7 +42,7 @@ Overflow: ## Unassigned items render at the top of maps/tasks.md. /review must g
 move it to ## Later. When there are more than 10, tasks-sync sends one tg-send alert per day.
 
 Brains searched: claude-computer, archive, vault, resources, library/camera,
-and every child of projects/, products/, personal/ that has a CLAUDE.md.
+and every child of clients/, projects/, products/, personal/ that has a CLAUDE.md.
 
 Exit codes: 0 ok · 2 usage · 5 vault missing
 """
@@ -54,15 +65,19 @@ UNASSIGNED_ALERT = 10
 STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "claude-computer/tasks-sync.json"
 START = "<!-- tasks-sync:start — generated, edit the brain's TASKS.md instead -->"
 END = "<!-- tasks-sync:end -->"
-BLOCK_RE = re.compile(r"<!-- tasks-sync:start.*?-->.*?<!-- tasks-sync:end -->", re.S)
+# A block, and also one whose start line an edit cut down to its tail (" — generated, … -->"): it is
+# replaced whole, so a damaged hub heals on the next run instead of growing a second block.
+BLOCK_RE = re.compile(r"(?:<!-- tasks-sync:start[^\n]*?|^ ?— generated, edit the brain's TASKS\.md instead) -->"
+                      r".*?<!-- tasks-sync:end -->", re.S | re.M)
 TASK_RE = re.compile(r"^\s*- \[( |x|X)\]\s+(.*)$")
 DUE_RE = re.compile(r"📅\s*(\d{4}-\d{2}-\d{2})")
 DONE_RE = re.compile(r"✅\s*(\d{4}-\d{2}-\d{2})")
 TAG_RE = re.compile(r"(?<!\S)#([\w/-]+)")
+FROZEN_RE = re.compile(r"^## Open at close\b", re.M)
+OPEN_STATUSES = ("idea", "active", "paused")
 FIXED_BRAINS = ("claude-computer", "archive", "vault", "resources", "library/camera")
 CONTAINERS = ("clients", "projects", "products", "personal")
 SKIP = ("_scratch",)
-RECENT_DONE_DAYS = 7
 
 
 @dataclass
@@ -148,8 +163,64 @@ def fmt(t: Task) -> str:
     return f"- [{box}] {t.text}{flag}"
 
 
-def render_map(by_brain: dict[str, list[Task]], today: dt.date) -> str:
-    recent = today - dt.timedelta(days=RECENT_DONE_DAYS)
+def repo_of(path: Path) -> str | None:
+    """owner/repo of the checkout's GitHub origin, or None."""
+    r = subprocess.run(["git", "-C", str(path), "remote", "get-url", "origin"],
+                       capture_output=True, text=True, check=False)
+    m = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", r.stdout.strip())
+    return m.group(1) if r.returncode == 0 and m else None
+
+
+def prop(text: str, key: str) -> str:
+    """A scalar front-matter property, unquoted; "" when absent."""
+    fm = re.match(r"^---\n(.*?)\n---", text, re.S)
+    m = re.search(rf"^{re.escape(key)}:[ \t]*['\"]?([^'\"\n]*?)['\"]?[ \t]*$", fm.group(1), re.M) if fm else None
+    return m.group(1).strip() if m else ""
+
+
+def freeze_block(text: str, today: dt.date) -> str:
+    """A gone brain's block, frozen as /archive does: markers off, the heading says when."""
+    m = BLOCK_RE.search(text)
+    body = m.group(0).split("\n", 1)[1].rsplit("\n", 1)[0]
+    body = body.replace("## Tasks", f"## Open at close (brain gone by {today.isoformat()})", 1)
+    return text[:m.start()] + body + text[m.end():]
+
+
+def gone_hubs(vault: Path, home: Path, brains: set[str]) -> list[tuple[Path, str]]:
+    """[(hub, text)] for hubs with a live block whose brain is not found and whose checkout is gone."""
+    out = []
+    pdir = vault / "memory" / "projects"
+    for hub in sorted(pdir.glob("*.md")) if pdir.is_dir() else []:
+        if hub.name.startswith("_") or hub.stem in brains:
+            continue
+        text = hub.read_text(encoding="utf-8")
+        local = prop(text, "local")
+        if not local or not BLOCK_RE.search(text):
+            continue
+        path = home / local[2:] if local.startswith("~/") else Path(local)
+        if not (path / "CLAUDE.md").is_file():
+            out.append((hub, text))
+    return out
+
+
+def to_close(vault: Path, written: dict[str, str]) -> list[tuple[str, str]]:
+    """[(hub, status)] for frozen hubs whose status still says the work goes on."""
+    out = []
+    pdir = vault / "memory" / "projects"
+    for hub in sorted(pdir.glob("*.md")) if pdir.is_dir() else []:
+        text = written.get(hub.stem) or hub.read_text(encoding="utf-8")
+        status = prop(text, "status")
+        if FROZEN_RE.search(text) and status in OPEN_STATUSES:
+            out.append((hub.stem, status))
+    return out
+
+
+def hub_link(brain: str, hubs: set[str]) -> str:
+    return f"[[memory/projects/{brain}|{brain}]]" if brain in hubs else brain
+
+
+def render_map(by_brain: dict[str, list[Task]], today: dt.date, hubs: set[str] = frozenset(),
+               closing: list[tuple[str, str]] = ()) -> str:
     lines = [
         "---",
         "type: map",
@@ -166,27 +237,25 @@ def render_map(by_brain: dict[str, list[Task]], today: dt.date) -> str:
         lines += [f"## Unassigned ({len(unassigned)})", "",
                   "> [!important] No brain owns these yet. `/review` gives each an owner or moves it to Later.", ""]
         lines += [fmt(t) for t in unassigned] + [""]
+    if closing:
+        lines += [f"## Hubs to close ({len(closing)})", "",
+                  "> [!important] Their brain has gone and the Tasks block is frozen. `/review` sets each hub's "
+                  "`status` (done · archived · abandoned) and `ended`.", ""]
+        lines += [f"- [[memory/projects/{h}|{h}]] — status: {s}" for h, s in closing] + [""]
     overdue = [t for ts in by_brain.values() for t in ts if t.overdue]
     if overdue:
-        lines += ["## Overdue", ""] + [f"{fmt(t)} — [[{t.brain}]]" for t in overdue] + [""]
+        lines += ["## Overdue", ""] + [f"{fmt(t)} — {hub_link(t.brain, hubs)}" for t in overdue] + [""]
     now = [t for ts in by_brain.values() for t in ts if t.section == "Now" and not t.done]
     if now:
-        lines += ["## Now, everywhere", ""] + [f"{fmt(t)} — [[{t.brain}]]" for t in now] + [""]
-    lines += ["## By brain", ""]
-    for brain in sorted(by_brain):
-        ts = by_brain[brain]
-        open_ts = [t for t in ts if not t.done]
-        closed = [t for t in ts if t.done and t.completed and t.completed >= recent.isoformat()]
-        open_ts = [t for t in open_ts if t.section != "Unassigned"]
-        if not open_ts and not closed:
+        lines += ["## Now, everywhere", ""] + [f"{fmt(t)} — {hub_link(t.brain, hubs)}" for t in now] + [""]
+    lines += ["## By brain", "", "Every open task is in the brain's hub, under Tasks.", ""]
+    for brain in sorted(by_brain, key=str.lower):
+        open_ts = [t for t in by_brain[brain] if not t.done and t.section != "Unassigned"]
+        if not open_ts:
             continue
-        lines += [f"### [[{brain}]]", ""]
-        for sec in OPEN_SECTIONS:
-            sec_ts = [t for t in open_ts if t.section == sec]
-            if sec_ts:
-                lines += [f"**{sec}**", ""] + [fmt(t) for t in sec_ts] + [""]
-        if closed:
-            lines += [f"**Closed in the last {RECENT_DONE_DAYS} days**", ""] + [fmt(t) for t in closed] + [""]
+        counts = ", ".join(f"{sum(t.section == sec for t in open_ts)} {sec.lower()}" for sec in OPEN_SECTIONS
+                           if any(t.section == sec for t in open_ts))
+        lines.append(f"- {hub_link(brain, hubs)} — {counts}")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -202,14 +271,18 @@ def render_block(tasks: list[Task]) -> str:
     return "\n".join(lines).rstrip() + "\n" + END
 
 
-def update_hub(existing: str | None, brain: str, block: str, today: dt.date) -> str:
+def update_hub(existing: str | None, brain: str, block: str, today: dt.date, repo: str = "", local: str = "") -> str:
     if existing is None:
         return (
-            f"---\ntype: project\ncreated: {today.isoformat()}\nstatus: active\n"
-            f"project: {brain}\ntags: []\n---\n\n# {brain}\n\n{block}\n"
+            f"---\ntype: project\ncreated: {today.isoformat()}\nstatus: active\nrepo: {repo}\n"
+            f"local: \"{local}\"\n---\n\n# {brain}\n\n{block}\n"
         )
-    if BLOCK_RE.search(existing):
-        return BLOCK_RE.sub(lambda _: block, existing, count=1)
+    if BLOCK_RE.search(existing):  # the first block is replaced, any further one (a damaged hub's) dropped
+        head, *rest = BLOCK_RE.split(existing)
+        return head + block + re.sub(r"^\n{3,}", "\n\n", "".join(rest))
+    m = re.search(r"^## Log\s*$", existing, re.M)
+    if m:
+        return existing[:m.start()] + block + "\n\n" + existing[m.start():]
     return existing.rstrip() + "\n\n" + block + "\n"
 
 
@@ -263,7 +336,8 @@ def main() -> int:
     today = dt.date.today()
 
     by_brain: dict[str, list[Task]] = {}
-    for name, d in find_brains(home):
+    brains = find_brains(home)
+    for name, d in brains:
         tf = d / "TASKS.md"
         by_brain[name] = parse(name, tf, today) if tf.is_file() else []
 
@@ -277,13 +351,25 @@ def main() -> int:
         return 5
 
     changes: list[str] = []
-    write(vault / "maps" / "tasks.md", render_map(by_brain, today), args.dry_run, changes)
-    for brain, ts in by_brain.items():
+    hubs: set[str] = set()
+    for brain, d in brains:
         if brain == "vault":
             continue
-        hub = vault / "projects" / f"{brain}.md"
+        hub = vault / "memory" / "projects" / f"{brain}.md"
         old = hub.read_text(encoding="utf-8") if hub.exists() else None
-        write(hub, update_hub(old, brain, render_block(ts), today), args.dry_run, changes)
+        repo = repo_of(d) if old is None else ""
+        if old is None and not repo:
+            continue
+        hubs.add(brain)
+        local = f"~/{d.relative_to(home)}" if d.is_relative_to(home) else str(d)
+        write(hub, update_hub(old, brain, render_block(by_brain[brain]), today, repo or "", local),
+              args.dry_run, changes)
+    frozen: dict[str, str] = {}
+    for hub, text in gone_hubs(vault, home, {b for b, _ in brains}):
+        frozen[hub.stem] = freeze_block(text, today)
+        write(hub, frozen[hub.stem], args.dry_run, changes)
+    closing = to_close(vault, frozen)
+    write(vault / "maps" / "tasks.md", render_map(by_brain, today, hubs, closing), args.dry_run, changes)
 
     n_open = sum(1 for ts in by_brain.values() for t in ts if not t.done)
     n_over = sum(1 for ts in by_brain.values() for t in ts if t.overdue)
@@ -291,7 +377,9 @@ def main() -> int:
     alerted = alert_unassigned(n_unassigned, today, args.dry_run)
     verb = "would update" if args.dry_run else "updated"
     print(f"tasks-sync: {len(by_brain)} brains, {n_open} open, {n_over} overdue, {n_unassigned} unassigned"
-          f"{' (alert sent)' if alerted else ''}; {verb} {len(changes)} files")
+          f"{' (alert sent)' if alerted else ''}"
+          f"{f'; froze {len(frozen)} gone brain(s): ' + ', '.join(frozen) if frozen else ''}"
+          f"{f'; {len(closing)} hub(s) to close' if closing else ''}; {verb} {len(changes)} files")
     for c in changes:
         print(f"  {c}")
     return 0

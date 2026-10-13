@@ -1,0 +1,15 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": [
+  {
+   "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+   "commit": {
+    "author": {
+     "date": "2025-03-02T10:00:00Z"
+    },
+    "message": "Add the widget parser"
+   }
+  }
+ ]
+}

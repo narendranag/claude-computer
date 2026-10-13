@@ -1,0 +1,81 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": {
+  "data": {
+   "repositoryOwner": {
+    "repositories": {
+     "pageInfo": {
+      "hasNextPage": true,
+      "endCursor": "c1"
+     },
+     "nodes": [
+      {
+       "name": "widget",
+       "isFork": false,
+       "isArchived": false,
+       "visibility": "PUBLIC",
+       "description": "Widgets, | piped",
+       "createdAt": "2025-01-05T00:00:00Z",
+       "pushedAt": "2026-09-30T00:00:00Z",
+       "diskUsage": 2048,
+       "stargazerCount": 0,
+       "primaryLanguage": {
+        "name": "Python"
+       },
+       "defaultBranchRef": {
+        "name": "main",
+        "target": {
+         "oid": "0000000000000000000000000000000000000000",
+         "history": {
+          "totalCount": 250
+         }
+        }
+       },
+       "object": {
+        "entries": [
+         {
+          "name": "README.md"
+         },
+         {
+          "name": "src"
+         }
+        ]
+       }
+      },
+      {
+       "name": "spoon",
+       "isFork": true,
+       "isArchived": false,
+       "visibility": "PUBLIC",
+       "description": null,
+       "createdAt": "2024-04-01T00:00:00Z",
+       "pushedAt": "2024-05-01T00:00:00Z",
+       "diskUsage": 30,
+       "stargazerCount": 0,
+       "primaryLanguage": {
+        "name": "Go"
+       },
+       "defaultBranchRef": {
+        "name": "main",
+        "target": {
+         "oid": "0000000000000000000000000000000000000000",
+         "history": {
+          "totalCount": 2
+         }
+        }
+       },
+       "object": {
+        "entries": [
+         {
+          "name": "README.md"
+         }
+        ]
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,15 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": [
+  {
+   "sha": "ffffffffffffffffffffffffffffffffffffffff",
+   "commit": {
+    "author": {
+     "date": "2025-01-05T10:00:00Z"
+    },
+    "message": "Initial commit"
+   }
+  }
+ ]
+}

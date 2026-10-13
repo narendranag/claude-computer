@@ -111,6 +111,20 @@ jobs:
       - name: capture matrix
         run: ./tests/capture.sh
 
+      # The vault's tools, offline: vault-lint's schema checks against fixtures; project-import from
+      # recorded GitHub responses; tasks-sync's hubs; vault-nightly end to end with a stand-in claude;
+      # commitments' owner and confirmations.
+      - name: vault-lint matrix
+        run: ./tests/vault-lint.sh
+      - name: project-import matrix
+        run: ./tests/project-import.sh
+      - name: tasks-sync matrix
+        run: ./tests/tasks-sync.sh
+      - name: vault-nightly matrix
+        run: ./tests/vault-nightly.sh
+      - name: commitments matrix
+        run: ./tests/commitments.sh
+
       # bin/template-pull against a throwaway template and instance; no network.
       - name: template-pull matrix
         run: ./tests/template-pull.sh

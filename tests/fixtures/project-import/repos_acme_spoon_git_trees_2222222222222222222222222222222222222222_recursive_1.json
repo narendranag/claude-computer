@@ -1,0 +1,16 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": {
+  "tree": [
+   {
+    "path": "README.md",
+    "type": "blob"
+   },
+   {
+    "path": "main.go",
+    "type": "blob"
+   }
+  ]
+ }
+}

@@ -1,0 +1,26 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": {
+  "full_name": "acme/spoon",
+  "html_url": "https://github.com/acme/spoon",
+  "default_branch": "main",
+  "visibility": "public",
+  "private": false,
+  "fork": true,
+  "archived": false,
+  "description": null,
+  "created_at": "2025-01-05T09:00:00Z",
+  "pushed_at": "2026-09-30T18:00:00Z",
+  "topics": [],
+  "size": 120,
+  "stargazers_count": 0,
+  "owner": {
+   "login": "acme"
+  },
+  "parent": {
+   "full_name": "upstream/spoon",
+   "default_branch": "main"
+  }
+ }
+}

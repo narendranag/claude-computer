@@ -1,0 +1,5 @@
+{
+ "status": 200,
+ "headers": {},
+ "body": "Widget\n======\n\nMakes widgets.\n\n## Install\n\n```sh\n# not a heading\nuv tool install widget\n```\n"
+}
