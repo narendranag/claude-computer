@@ -8,6 +8,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- **`bin/capture`: your phone and your email into the vault inbox.** Messages you send your Telegram bot become notes in `~/vault/inbox/` (text as sent; photos and documents saved alongside; voice notes transcribed on the Mac by `macparakeet-cli`, nothing leaves it), and so does every Gmail message you label `vault`, which is then relabelled `vault/filed`. Only `telegram.chat_id`'s messages are kept; each run commits the vault and replies "📥 n saved". `schedule install capture` runs it every 5 minutes, on one machine only: Telegram gives each message to whichever machine asks first. `/setup` offers it; `tests/capture.sh` runs it offline in CI.
+- **`gcal day DATE` and `gcal at START --minutes N`.** `at` lists the timed events overlapping a span, most overlap first (`_overlap_min` in `--json`); `/transcripts` uses it to name a recorded meeting and its attendees.
+- **`gmail draft|send --attach FILE`** (repeatable, 25 MB in all). Messages go up as a media upload, which the API needs above about 5 MB.
 - **`bin/https-check`: every public domain redirects http to https.** It fails a domain whose `http://` doesn't answer 301/308 to `https://`, and `--fix` turns on Cloudflare "Always Use HTTPS" for th [... omitted end of long line]
 - **`gmail attachments <id>`** lists a message's attachments, and `--save DIR` writes them there — by file name only, never a path from the sender, and never over an existing file.
 - **`secrets unset <name.field>`** removes one value, and its name once no field is left. It asks on a terminal and needs `--yes` without one; exit 5 if the value isn't set. Renaming a secret no longer needs a raw `sops unset`.
@@ -43,6 +46,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- **`gmail` reports a Google API error in one line** (`Google API 400: Invalid ids value`, exit 1) instead of a traceback.
 - **The Stop hook pushes `docs/` again in an instance with an `upstream` remote.** It asked a bare `gh repo view` whether the repo was public, and gh answers for the `upstream` remote when one exists — the public template — so every `docs/` change was committed but never pushed. It now names `origin` by URL; `/setup`'s privacy check does the same.
 - **`rm` asks again.** Unwiring the rm-guard hook left `rm` with no rule at all, since the hook had replaced the `Bash(rm:*)` ask rule. The rule is back in `claude-global/settings.json`, so every `rm` prompts, as the README and `docs/TEMPLATE-DECISIONS.md` say; opting into the hook means removing it.
 - **`dotfiles/zshenv` exports `SOPS_AGE_KEY_FILE`**, so a plain `sops` in a terminal finds the age key; macOS's default would be `~/Library/Application Support/sops/`.
