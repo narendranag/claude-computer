@@ -408,7 +408,7 @@ Paste [`docs/FIRST-PROMPT.md`](docs/FIRST-PROMPT.md) — the installer already p
 
 **Contributing.** Mostly you shouldn't have to — fork it and make it yours. But if you have made something general work (another camera, Linux, a tool that does what sops or R2 does here), [`CONTRIBUTING.md`](CONTRIBUTING.md) says how. Security problems go through a private advisory, never a public issue: [`SECURITY.md`](SECURITY.md).
 
-**Keeping up with the template.** Your instance keeps this repo as an `upstream` remote, fetch-only. Pull improvements when you choose. When you learn something worth sharing, `/upstream` rewrites it generically and opens a pull request here — never a push from your private instance.
+**Keeping up with the template.** Your instance keeps this repo as an `upstream` remote, fetch-only, and pulls a release when you choose: `template-pull` lists them, `template-pull v0.6.0 --dry-run` shows what would change and conflict, and `template-pull v0.6.0` stages it. A copy made with "Use this template" shares no history with this repo, so `git merge` refuses; `template-pull` applies the template's own diff between the release you are on (`.template-version`) and the new one, three-way, so your changes survive and only lines both sides touched conflict. It commits nothing, and ends with the CHANGELOG's notes for those releases: do every "Migrating from" step on each machine. When you learn something worth sharing, `/upstream` rewrites it generically and opens a pull request here — never a push from your private instance.
 
 ## Who's behind this
 
