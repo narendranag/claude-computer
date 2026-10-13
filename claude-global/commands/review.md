@@ -14,4 +14,4 @@ Gather (run in parallel where you can):
 5. **Vault** — notes left in `inbox/`; transcripts still `status: unprocessed`; `sources/feeds/` digests with nothing saved.
 6. **Housekeeping** — `~/projects/_scratch` items older than 30 days (propose sweeping to `~/archive`); `~/resources/*/INDEX.md` expiry dates in the next 90 days (route "renew" tasks to `~/resources/TASKS.md`).
 
-Write the review note with those five sections, then tell me in under ten lines: what moved, what's stuck, and the three things you'd do next. Ask before acting on any proposal.
+Write the review note with those six sections, then tell me in under ten lines: what moved, what's stuck, and the three things you'd do next. Ask before acting on any proposal.

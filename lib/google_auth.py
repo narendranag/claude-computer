@@ -1,6 +1,6 @@
 """OAuth for the gcal / gmail / gdrive / gtasks wrappers (and analytics).
 
-One OAuth client (Desktop app) and one token shared by all three wrappers, both in the
+One OAuth client (Desktop app) and one token shared by every Google wrapper, both in the
 secrets store (docs/SECRETS.md):
   google.credentials   the downloaded credentials.json
   google.token         the authorised token (written by the first run)
