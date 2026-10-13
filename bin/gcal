@@ -18,7 +18,7 @@ Usage:
                                                     create an event (default: primary); ISO like
                                                     2026-10-01T09:00:00+05:30, or a date (2026-10-01) for all-day
 
-Auth: OAuth token shared with gmail/gdrive, kept in the secrets store (see lib/google_auth.py).
+Auth: OAuth token shared with gmail/gdrive/gtasks, kept in the secrets store (see lib/google_auth.py).
 Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
 """
 

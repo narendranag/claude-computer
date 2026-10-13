@@ -22,7 +22,7 @@ Usage:
                                           --remove UNREAD marks read; --create makes a missing label
   --reply ID   answer that message: same thread, In-Reply-To/References set, "Re:" added to the subject
 
-Auth: OAuth token shared with gcal/gdrive, kept in the secrets store (see lib/google_auth.py).
+Auth: OAuth token shared with gcal/gdrive/gtasks, kept in the secrets store (see lib/google_auth.py).
 Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
 """
 

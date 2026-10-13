@@ -1,6 +1,6 @@
-"""OAuth for the gcal / gmail / gdrive wrappers.
+"""OAuth for the gcal / gmail / gdrive / gtasks wrappers (and analytics).
 
-One OAuth client (Desktop app) and one token shared by all three wrappers, both in the
+One OAuth client (Desktop app) and one token shared by every Google wrapper, both in the
 secrets store (docs/SECRETS.md):
   google.credentials   the downloaded credentials.json
   google.token         the authorised token (written by the first run)
@@ -44,6 +44,7 @@ SCOPES = [
     _G + "spreadsheets",
     _G + "presentations",
     _G + "contacts",                # People API
+    _G + "tasks",                   # gtasks: read lists, note hand-offs, mark tasks done
     _G + "chat.messages",           # Google Chat (Workspace accounts only, Google says)
     _G + "chat.spaces.readonly",
     _G + "meetings.space.created",  # Meet: create spaces, read their conferences

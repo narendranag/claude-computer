@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- **Google Tasks: `bin/gtasks`** (`lists`, `list`, `handoff`, `done`). Google Tasks becomes the high-level list you jot into from anywhere: `/review` proposes a brain for every task not handed over yet, writes it into that brain's `TASKS.md` tagged `#gtasks`, and `gtasks handoff` notes `→ <brain>` on the Google task, which stays open until the brain's work is done. **Existing instances:** enable the Tasks API in your Google Cloud project; `lib/google_auth.py` asks for the new `tasks` scope, so the next `gcal`, `gmail`, `gdrive` or `gtasks` run opens the browser for consent once.
 - **The tab title names the client, project or product.** `dotfiles/zshrc` titles each tab from where the shell is: `~/clients/<name>`, `~/projects/<name>` and `~/products/<name>` give `<name>`, a `wt` worktree gives `<name> ⎇ <branch>`, anywhere else under `~` its top folder; over ssh the host comes first. `tabtitle <text>` pins a title, `tabtitle` alone goes back to automatic. Ghostty's own title and oh-my-zsh's are off; Claude Code still sets the title while it runs, so `/rename` reaches the tab.
 - **`dotfiles/ghostty.config` loads `~/.config/ghostty/local.ghostty` last**, when present: per-machine overrides that are never committed.
 - **`bin/https-check`: every public domain redirects http to https.** It fails a domain whose `http://` doesn't answer 301/308 to `https://`, and `--fix` turns on Cloudflare "Always Use HTTPS" for th [... omitted end of long line]
