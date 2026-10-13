@@ -6,6 +6,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-13
+
+### Migrating from 0.5
+
+On each machine, after pulling this release:
+
+1. **Pull it.** `template-pull` arrives with this release, so bring the script in first, commit it, then let it apply the rest (needs the `upstream` remote; `/setup` adds it):
+   ```bash
+   git fetch --no-tags upstream '+refs/tags/v*:refs/template/v*'
+   git show refs/template/v0.6.0:bin/template-pull > bin/template-pull && chmod +x bin/template-pull
+   git add bin/template-pull && git commit -m "template-pull from v0.6.0"
+   bin/template-pull v0.6.0 --from v0.5.0
+   ```
+   Resolve any conflicts, review `git diff --cached`, commit and push. It writes `.template-version`, so later releases are just `template-pull <tag>`.
+2. **Google.** In your Google Cloud project, enable the APIs for the scopes you will use (Tasks, Docs, Sheets, Slides, People, Chat, Meet, Analytics Data and Admin, Tag Manager), and publish the OAuth app to production if it is still in Testing ([`docs/SECRETS.md`](docs/SECRETS.md)). The new scopes (`tasks`, `calendar.calendarlist.readonly` and the wider set) mean the next `gcal`, `gmail`, `gdrive` or `gtasks` run opens the browser for consent once.
+3. **Packages.** `brew bundle` (and `brew bundle --file Brewfile.dev` on dev machines): `naabu` arrives and `typescript-language-server` for the TypeScript plugin; `brew uninstall nmap` if nothing else of yours uses it.
+4. **Scheduled jobs.** A plist written by `schedule` under bash 5.2 or newer has a mangled command (`<lt;`), so reinstall each job you run: `schedule list`, then `schedule install <job>` for each one loaded.
+5. **Capture** (optional, one machine only): set `telegram.chat_id` if `tg-send` doesn't already use it, then `schedule install capture` there.
+6. **Shell and terminal.** `dotfiles/zshrc`, `dotfiles/ghostty.config` and `dotfiles/gitignore_global` are linked, so they change on pull: open a new terminal window, and restart Ghostty for the tab titles. Restart Claude Code so it loads the new `settings.json` (the `rm` rule, the LSP plugins, `dashboard` and `docs-build` allowed).
+7. **Projects** made before this release keep working as they are. A web app moves to Workers through OpenNext by copying `templates/web/wrangler.jsonc` and `open-next.config.ts` and adding the scripts `new-app web` now adds; an `.envrc` can move to one `ENV_VAR=<name>.<field>` pair per key, as the templates now do.
+
 ### Added
 
 - **`bin/template-pull`: bring a template release into your instance.** A copy made with "Use this template" shares no history with the template, so `git merge` refuses. `template-pull` lists the releases, and `template-pull <tag>` applies the template's diff from the release you are on to that one, three-way (`git diff --binary | git apply --3way --index`): your changes survive, only lines both sides changed conflict, and a file you deleted stays deleted (named, if the template changed it). Nothing is committed; it ends with the CHANGELOG for those releases. `--dry-run` tries it in a throwaway worktree. The release you are on is in the new `.template-version`. **Existing instances:** you have no `.template-version` yet, so the first time pass `--from <the release you were made from>` (an earlier one is safe: what you already have applies as a no-op); the file is written then. `tests/template-pull.sh` runs in CI. Releasing is written down in `CONTRIBUTING.md`.
@@ -44,7 +65,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - `docs/DEV-GUIDELINES.md`: Next.js deploys through OpenNext; Turso is allowed on Workers when each product needs its own database; CI checks every push and deploys are by hand where there are migrations (deploy-on-tag only for real releases); new rows for a health check and for reading secrets only where they're used; PostHog may be one shared project for a portfolio of small products; the `.env.local` rule; Playwright pinned exactly to the fleet's version, sharing one browser cache; a file another tool reads by path keeps its name and format.
 - `tasks-sync` skips linked git worktrees: a worktree is a branch of a brain, not a second brain.
 - `/upstream` never carries a section headed "This instance (not for upstream)", so an instance can keep its own notes in a shared document.
-
 - `dotfiles/gitignore_global` ignores `.dashboard/`. `claude-global/settings.json` allows `dashboard`.
 - **`rm` in temporary folders no longer prompts.** A PreToolUse hook, `claude-global/hooks/rm-guard.py`, replaces the `Bash(rm:*)` ask rule. It allows a plain `rm` whose targets are all literal absolute paths strictly inside `/tmp` or `$TMPDIR` (after resolving symlinks, with no `..`), and returns "ask" for every other `rm`: compound commands, variables, globs, `~`, `sudo`, `xargs`, relative paths, and the temporary folder itself. It fails closed. `tests/rm-guard.sh` runs in CI.
 - **Wider Google scopes.** `lib/google_auth.py` asks for Gmail modify, Calendar events, Drive, Docs, Sheets, Slides, Contacts, Chat, Meet, Analytics (read and edit) and Tag Manager (read, edit containers, versions, publish). When the stored token lacks a scope, the next run asks for consent again instead of failing with 403s. `docs/SECRETS.md`: publish the OAuth app to production (External consent screen, Branding filled in, no logo) — in Testing, Google expires the sign-in every 7 days.
@@ -267,7 +287,8 @@ First public release.
 - README with hand-drawn light/dark diagrams generated by `docs/diagrams/render.py`.
 - Permission mode: auto, with explicit ask and deny rules.
 
-[Unreleased]: https://github.com/narendranag/claude-computer/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/narendranag/claude-computer/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/narendranag/claude-computer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/narendranag/claude-computer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/narendranag/claude-computer/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/narendranag/claude-computer/compare/v0.3.1...v0.3.2
