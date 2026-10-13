@@ -8,6 +8,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- **`bin/capture`: your phone and your email into the vault inbox.** Messages you send your Telegram bot become notes in `~/vault/inbox/` (text as sent; photos and documents saved alongside; voice notes transcribed on the Mac by `macparakeet-cli`, nothing leaves it), and so does every Gmail message you label `vault`, which is then relabelled `vault/filed`. Only `telegram.chat_id`'s messages are kept; each run commits the vault and replies "📥 n saved". `schedule install capture` runs it every 5 minutes, on one machine only: Telegram gives each message to whichever machine asks first. `/setup` offers it; `tests/capture.sh` runs it offline in CI.
+- **`gcal day DATE` and `gcal at START --minutes N`.** `at` lists the timed events overlapping a span, most overlap first (`_overlap_min` in `--json`); `/transcripts` uses it to name a recorded meeting and its attendees.
+- **`gmail draft|send --attach FILE`** (repeatable, 25 MB in all). Messages go up as a media upload, which the API needs above about 5 MB.
 - **Google Tasks: `bin/gtasks`** (`lists`, `list`, `handoff`, `done`). Google Tasks becomes the high-level list you jot into from anywhere: `/review` proposes a brain for every task not handed over yet, writes it into that brain's `TASKS.md` tagged `#gtasks`, and `gtasks handoff` notes `→ <brain>` on the Google task, which stays open until the brain's work is done. **Existing instances:** enable the Tasks API in your Google Cloud project; `lib/google_auth.py` asks for the new `tasks` scope, so the next `gcal`, `gmail`, `gdrive` or `gtasks` run opens the browser for consent once.
 - **The tab title names the client, project or product.** `dotfiles/zshrc` titles each tab from where the shell is: `~/clients/<name>`, `~/projects/<name>` and `~/products/<name>` give `<name>`, a `wt` worktree gives `<name> ⎇ <branch>`, anywhere else under `~` its top folder; over ssh the host comes first. `tabtitle <text>` pins a title, `tabtitle` alone goes back to automatic. Ghostty's own title and oh-my-zsh's are off; Claude Code still sets the title while it runs, so `/rename` reaches the tab.
 - **`dotfiles/ghostty.config` loads `~/.config/ghostty/local.ghostty` last**, when present: per-machine overrides that are never committed.
@@ -48,6 +51,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Fixed
 
+- **`gmail` reports a Google API error in one line** (`Google API 400: Invalid ids value`, exit 1) instead of a traceback.
 - **The Google wrappers no longer hang where IPv6 resolves but has no route.** httplib2 connects to the first address it gets and waits for the timeout; `lib/google_auth.py` now orders IPv4 addresses first, and IPv6 is still tried after them.
 - **`setup-tools.sh autoupdate` works on a freshly erased Mac**: it creates `~/Library/LaunchAgents`, which `brew autoupdate start` needs and won't create.
 - **`install.sh`'s last step works in the window it ran in.** When that shell started without Homebrew on its PATH, `claude` isn't found there until the profile loads, so step 1 now says to open a new window or run `exec zsh -l` first.

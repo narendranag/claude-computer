@@ -1,0 +1,329 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""capture — bring what you send from your phone, and what you label in Gmail, into the vault's inbox/.
+
+Two sources, each a plain copy into <vault>/inbox/ for /inbox to file. Nothing is classified here.
+
+  telegram   messages you send to your bot (telegram.token; only telegram.chat_id is accepted — anyone
+             else's message is skipped, never saved). One note per message:
+               text, links          inbox/<date>-telegram-<id>.md, the words as sent
+               photo, document      the file into attachments/telegram/, the note embeds or links it
+               voice, audio         transcribed on this Mac (macparakeet-cli, nothing leaves it); the
+                                    note holds the transcript and links the audio
+             Then one "📥 n saved" reply. The offset of the last update is kept in
+             ~/.local/state/claude-computer/capture.json; Telegram keeps updates for 24 hours.
+  gmail      every message with the label `vault` (apply it in Gmail; the label appears when you first
+             use it) → inbox/<date>-email-<slug>.md (`type: source`, `kind: email`, headers, the body as
+             text, attachments in attachments/email/<id>/). The label is then swapped for `vault/filed`.
+
+Each run commits what it wrote to the vault (`capture: n from telegram, m from gmail`).
+
+Run it on one machine only (`schedule install capture` there): Telegram hands each message to whichever
+machine asks first, and the offset that says what has been seen is kept per machine.
+
+Usage:
+  capture [telegram|gmail|all] [--vault DIR] [--dry-run]     (default: all)
+
+  --dry-run   show what would be saved; fetch nothing that changes state (Telegram's offset and Gmail's
+              labels stay as they are), write nothing
+
+Exit codes: 0 ok (or nothing new) · 1 a source failed (the other still ran) · 2 usage · 4 no key / not
+admitted · 5 a secret is not set, or no vault
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import email.utils
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import cc  # noqa: E402
+
+BIN = cc.ROOT / "bin"
+STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "claude-computer/capture.json"
+LABEL, FILED = "vault", "vault/filed"
+MAX_FILE = 20 * 1024 * 1024  # the Bot API's download limit
+
+
+def slug(s: str, n: int = 60) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:n].strip("-") or "untitled"
+
+
+def yq(s: str) -> str:
+    """A YAML double-quoted scalar."""
+    return json.dumps(s, ensure_ascii=False)
+
+
+def load_state() -> dict:
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_state(state: dict) -> None:
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    STATE.write_text(json.dumps(state))
+
+
+def unique(path: Path) -> Path:
+    i, p = 2, path
+    while p.exists():
+        p = path.with_name(f"{path.stem}-{i}{path.suffix}")
+        i += 1
+    return p
+
+
+# ---------------------------------------------------------------- telegram
+
+
+class Bot:
+    def __init__(self, token: str):
+        self._token = token  # never printed: it is in every URL below
+
+    def call(self, method: str, **params) -> dict:
+        url = f"https://api.telegram.org/bot{self._token}/{method}"
+        data = urllib.parse.urlencode(params).encode() if params else None
+        try:
+            with urllib.request.urlopen(url, data=data, timeout=30) as r:
+                out = json.load(r)
+        except urllib.error.HTTPError as e:
+            out = json.loads(e.read() or b"{}")
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise cc.CCError(cc.EX_FAIL, f"telegram {method}: {e.__class__.__name__}") from None
+        if not out.get("ok"):
+            raise cc.CCError(cc.EX_FAIL, f"telegram {method}: {out.get('description', 'failed')}")
+        return out["result"]
+
+    def download(self, file_id: str, dest: Path) -> Path | None:
+        f = self.call("getFile", file_id=file_id)
+        if not f.get("file_path") or (f.get("file_size") or 0) > MAX_FILE:
+            return None
+        suffix = Path(f["file_path"]).suffix or dest.suffix
+        # Telegram names voice notes .oga; macparakeet-cli refuses that extension but takes the same
+        # Ogg Opus file as .ogg.
+        dest = unique(dest.with_suffix(".ogg" if suffix == ".oga" else suffix))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(f"https://api.telegram.org/file/bot{self._token}/{f['file_path']}",
+                                    timeout=120) as r:
+            dest.write_bytes(r.read())
+        return dest
+
+
+def transcribe(audio: Path) -> str:
+    cli = Path.home() / ".local/bin/macparakeet-cli"
+    if not cli.exists():
+        return ""
+    # json, not text: text adds a header and a line per word with its timings.
+    r = subprocess.run([str(cli), "transcribe", str(audio), "--no-history", "--format", "json"],
+                       capture_output=True, text=True, check=False, timeout=900)
+    # With --format json a failure is JSON on stdout too: {"ok": false, "error": "..."}.
+    try:
+        out = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        out = {}
+    if isinstance(out, list):
+        out = out[0] if out else {}
+    said = (out.get("rawTranscript") or "").strip() if r.returncode == 0 else ""
+    if not said:
+        lines = (out.get("error") or r.stderr or f"exit {r.returncode}").strip().splitlines() or ["no transcript"]
+        why = lines[0] if len(lines) == 1 else f"{lines[0][:80]} … {lines[-1]}"
+        print(f"capture: {audio.name} not transcribed: {why[:200]}", file=sys.stderr)
+    return said
+
+
+def telegram_note(bot: Bot, vault: Path, msg: dict, dry: bool) -> tuple[Path, str] | None:
+    when = dt.datetime.fromtimestamp(msg.get("date", time.time()))
+    mid = msg["message_id"]
+    base = f"{when:%Y-%m-%d}-telegram-{mid}"
+    text = msg.get("text") or msg.get("caption") or ""
+    kind, body = "text", [text] if text else []
+    fwd = (msg.get("forward_origin") or {})
+    fwd_from = (fwd.get("sender_user") or {}).get("first_name") or (fwd.get("chat") or {}).get("title") \
+        or fwd.get("sender_user_name") or ""
+    att_dir = vault / "attachments" / "telegram"
+    if msg.get("photo"):
+        kind = "photo"
+        if not dry:
+            p = bot.download(msg["photo"][-1]["file_id"], att_dir / f"{base}.jpg")
+            body.insert(0, f"![[{p.relative_to(vault)}]]" if p else "(photo too large to fetch)")
+    elif msg.get("voice") or msg.get("audio"):
+        kind = "voice"
+        if not dry:
+            a = msg.get("voice") or msg.get("audio")
+            p = bot.download(a["file_id"], att_dir / f"{base}.ogg")
+            said = transcribe(p) if p else ""
+            body = ([said] if said else ["(not transcribed)"]) + ([f"\nAudio: [[{p.relative_to(vault)}]]"] if p else [])
+            if text:
+                body.append(f"\nCaption: {text}")
+    elif msg.get("document"):
+        kind = "document"
+        if not dry:
+            d = msg["document"]
+            name = slug(Path(d.get("file_name") or "file").stem) + Path(d.get("file_name") or "").suffix
+            p = bot.download(d["file_id"], att_dir / f"{base}-{name}")
+            body.append(f"[[{p.relative_to(vault)}]]" if p else f"(document {d.get('file_name')} too large to fetch)")
+    elif not text:
+        return None  # stickers, joins, edits: nothing to keep
+    fm = ["---", f"created: {when:%Y-%m-%d}", "source: telegram", f"captured: {when:%Y-%m-%dT%H:%M}",
+          f"telegram_kind: {kind}"] + ([f"forwarded_from: {yq(fwd_from)}"] if fwd_from else []) + ["---", ""]
+    return vault / "inbox" / f"{base}.md", "\n".join(fm + body).rstrip() + "\n"
+
+
+def capture_telegram(vault: Path, dry: bool, state: dict) -> list[Path]:
+    # cc.secret raises exit 5 (no store, or not set), 3 (no sops) or 4 (no key) with the fix in the message.
+    bot = Bot(cc.secret("telegram", "token"))
+    owner = str(cc.secret("telegram", "chat_id")).strip()
+    offset = int(state.get("telegram_offset", 0))
+    updates = bot.call("getUpdates", offset=offset + 1 if offset else 0, timeout=0,
+                       allowed_updates='["message"]')
+    saved = []
+    for u in updates:
+        offset = max(offset, u["update_id"])
+        msg = u.get("message") or {}
+        if str((msg.get("chat") or {}).get("id")) != owner:
+            continue  # someone else found the bot: never saved
+        if (msg.get("text") or "").strip() in ("/start", "/help"):
+            continue
+        made = telegram_note(bot, vault, msg, dry)
+        if not made:
+            continue
+        path, text = made
+        if dry:
+            print(f"would save {path.relative_to(vault)} ({len(text)} bytes)")
+        else:
+            path = unique(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        saved.append(path)
+    if not dry:
+        state["telegram_offset"] = offset
+        save_state(state)
+        if saved:
+            bot.call("sendMessage", chat_id=owner, text=f"📥 {len(saved)} saved to the vault inbox",
+                     disable_notification="true")
+    return saved
+
+
+# ---------------------------------------------------------------- gmail
+
+
+def gmail(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run([str(BIN / "gmail"), *args], capture_output=True, text=True, check=False)
+
+
+def capture_gmail(vault: Path, dry: bool) -> list[Path]:
+    r = gmail("search", f"label:{LABEL}", "-n", "50", "--json")
+    if r.returncode != 0:
+        raise cc.CCError(r.returncode if r.returncode in (4, 5) else cc.EX_FAIL,
+                         f"gmail search: {(r.stderr or r.stdout).strip()[:200]}")
+    saved = []
+    for m in json.loads(r.stdout or "[]"):
+        mid = m["id"]
+        if not re.fullmatch(r"[A-Za-z0-9]+", mid):
+            continue
+        # The day on this Mac, not in the sender's time zone (the Date header's own date).
+        try:
+            when = email.utils.parsedate_to_datetime(m.get("date", "")).astimezone()
+        except (TypeError, ValueError):
+            when = dt.datetime.now()
+        day = when.strftime("%Y-%m-%d") if when.year > 2000 else dt.date.today().isoformat()
+        subject = (m.get("subject") or "(no subject)").strip()
+        path = vault / "inbox" / f"{day}-email-{slug(subject)}.md"
+        if dry:
+            print(f"would save {path.relative_to(vault)} — {subject[:70]}")
+            saved.append(path)
+            continue
+        g = gmail("get", mid)
+        if g.returncode != 0:
+            print(f"capture: gmail get {mid} failed: {g.stderr.strip()[:120]}", file=sys.stderr)
+            continue
+        att = vault / "attachments" / "email" / mid
+        a = gmail("attachments", mid, "--save", str(att))
+        files = sorted(p for p in att.iterdir()) if a.returncode == 0 and att.is_dir() else []
+        lines = ["---", "type: source", f"created: {dt.date.today().isoformat()}", "kind: email", f"date: {day}",
+                 f"author: {yq((m.get('from') or '').strip())}", f"summary: {yq(subject)}",
+                 f"url: https://mail.google.com/mail/u/0/#all/{mid}", "source: gmail", "---", "",
+                 g.stdout.strip()]  # `gmail get` starts with "# <subject>"
+        if files:
+            lines += ["", "## Attachments", ""] + [f"- [[{p.relative_to(vault)}]]" for p in files]
+        path = unique(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        saved += [path, *files]
+        lr = gmail("label", mid, "--remove", LABEL, "--add", FILED, "--create")
+        if lr.returncode != 0:
+            print(f"capture: saved {path.name}, but relabelling failed: {lr.stderr.strip()[:120]}", file=sys.stderr)
+    return saved
+
+
+# ---------------------------------------------------------------- main
+
+
+def commit(vault: Path, paths: list[Path], msg: str) -> None:
+    rel = [str(p.relative_to(vault)) for p in paths if p.exists()]
+    for attempt in range(4):  # Obsidian Git may hold the index for a moment
+        a = subprocess.run(["git", "-C", str(vault), "add", "--", *rel], capture_output=True, text=True, check=False)
+        c = subprocess.run(["git", "-C", str(vault), "commit", "-q", "-m", msg, "--", *rel],
+                           capture_output=True, text=True, check=False) if a.returncode == 0 else a
+        if c.returncode == 0 or "index.lock" not in c.stderr:
+            return
+        time.sleep(2 * (attempt + 1))
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("-h", "--help", action="store_true")
+    ap.add_argument("source", nargs="?", default="all")
+    ap.add_argument("--vault", type=Path, default=Path(os.environ.get("CC_VAULT") or Path.home() / "vault"))
+    ap.add_argument("--dry-run", action="store_true")
+    try:
+        a = ap.parse_args()
+    except SystemExit:
+        return cc.EX_USAGE
+    if a.help:
+        print(__doc__)
+        return cc.EX_OK
+    if a.source not in ("telegram", "gmail", "all"):
+        raise cc.CCError(cc.EX_USAGE, "source is telegram, gmail or all")
+    vault = a.vault.expanduser()
+    if not (vault / "inbox").is_dir():
+        raise cc.CCError(cc.EX_CONFIG, f"no vault inbox at {vault}/inbox")
+    state = load_state()
+    counts, saved, failed = {}, [], 0
+    for src in ("telegram", "gmail"):
+        if a.source not in (src, "all"):
+            continue
+        try:
+            got = capture_telegram(vault, a.dry_run, state) if src == "telegram" else capture_gmail(vault, a.dry_run)
+        except cc.CCError as e:
+            if a.source == src:
+                raise  # the only source asked for: its error and exit code are the run's
+            print(f"capture: {src}: {e}", file=sys.stderr)
+            failed += 1
+            continue
+        counts[src] = sum(p.suffix == ".md" for p in got)
+        saved += got
+    summary = ", ".join(f"{n} from {s}" for s, n in counts.items() if n)
+    if saved and not a.dry_run:
+        commit(vault, saved, f"capture: {summary}")
+    print(f"capture: {summary or 'nothing new'}")
+    return cc.EX_FAIL if failed else cc.EX_OK
+
+
+if __name__ == "__main__":
+    cc.run_main(main)

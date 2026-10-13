@@ -9,6 +9,7 @@ Work in `~/vault` and follow its `CLAUDE.md` → **Process transcripts**.
 2. Take `$ARGUMENTS` if given; otherwise every note in `inbox/transcripts/` with `status: unprocessed`, oldest `date` first.
 3. For each one:
    - **Summary** → `notes/<what was discussed>.md` from `_templates/transcript-summary.md`: exactly five summary lines, **Decisions**, **Open questions**; `source` links the transcript. Project decisions also go to that project's `DECISIONS.md`.
+   - **Meeting** → for a recorded meeting, `gcal at <date>T<start time> --minutes <duration> --json` lists the calendar events it overlaps, most overlap first. The top one names the meeting and its attendees; say so when two overlap about equally, rather than pick.
    - **People** → `[[people/<name>]]` links; create missing person notes.
    - **Action items** → owning brain's `TASKS.md` under `## Next`, ending `← [[notes/<summary>]]`. No clear owner → `~/vault/TASKS.md` under `## Unassigned` with the same backlink. When the owner is genuinely ambiguous between two brains, pick Unassigned rather than guess.
    - **File the transcript** → move to `sources/transcripts/`, `status: processed`, add `summary: "[[notes/<summary>]]"`. Don't touch the transcript text.

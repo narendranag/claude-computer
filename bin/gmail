@@ -12,15 +12,16 @@ Usage:
                                           list a message's attachments; --save writes them into DIR
                                           (by file name only, never overwriting)
   gmail labels                            list labels
-  gmail draft --to A[,B] --subject S (--body TEXT | --body-file PATH|-) [--cc X] [--bcc X] [--reply ID]
+  gmail draft --to A[,B] --subject S (--body TEXT | --body-file PATH|-) [--cc X] [--bcc X] [--reply ID] [--attach FILE]…
                                           save a draft; prints its id (nothing is sent)
-  gmail send  --to A[,B] --subject S (--body TEXT | --body-file PATH|-) [--cc X] [--bcc X] [--reply ID]
+  gmail send  --to A[,B] --subject S (--body TEXT | --body-file PATH|-) [--cc X] [--bcc X] [--reply ID] [--attach FILE]…
                                           send now; prints the message id
   gmail send --draft DRAFT_ID             send a saved draft
   gmail label ID [ID…] [--add NAME]… [--remove NAME]… [--create]
                                           change labels by name; --remove INBOX archives, --add STARRED stars,
                                           --remove UNREAD marks read; --create makes a missing label
   --reply ID   answer that message: same thread, In-Reply-To/References set, "Re:" added to the subject
+  --attach F   attach a file (repeatable); Gmail's limit is 25 MB for the whole message
 
 Auth: OAuth token shared with gcal/gdrive/gtasks, kept in the secrets store (see lib/google_auth.py).
 Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
@@ -31,6 +32,7 @@ import base64
 from email.message import EmailMessage
 import html
 import json
+import mimetypes
 import re
 import sys
 from pathlib import Path
@@ -71,8 +73,8 @@ def strip_html(s: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", html.unescape(s)).strip()
 
 
-def compose(svc, a) -> dict:
-    """A Gmail API message body (raw, and threadId for a reply) from the parsed arguments."""
+def compose(svc, a) -> tuple[dict, bytes]:
+    """The Gmail API message body (threadId for a reply) and the raw RFC 822 bytes."""
     if (a.body is None) == (a.body_file is None):
         raise cc.CCError(cc.EX_USAGE, "give exactly one of --body or --body-file")
     text = a.body if a.body is not None else (sys.stdin.read() if a.body_file == "-" else Path(a.body_file).read_text())
@@ -95,8 +97,24 @@ def compose(svc, a) -> dict:
         out["threadId"] = orig["threadId"]
     m["Subject"] = subject
     m.set_content(text)
-    out["raw"] = base64.urlsafe_b64encode(m.as_bytes()).decode()
-    return out
+    for f in a.attach:
+        path = Path(f).expanduser()
+        if not path.is_file():
+            raise cc.CCError(cc.EX_USAGE, f"no such file to attach: {f}")
+        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        maintype, subtype = ctype.split("/", 1)
+        m.add_attachment(path.read_bytes(), maintype=maintype, subtype=subtype, filename=path.name)
+    raw = m.as_bytes()
+    if len(raw) > 25 * 1024 * 1024:
+        raise cc.CCError(cc.EX_USAGE, f"message is {len(raw) / 1048576:.1f} MB encoded; Gmail's limit is 25 MB")
+    return out, raw
+
+
+def upload(raw: bytes):
+    """Send the raw message as a media upload: the API refuses inline raw bodies over about 5 MB."""
+    import io
+    from googleapiclient.http import MediaIoBaseUpload
+    return MediaIoBaseUpload(io.BytesIO(raw), mimetype="message/rfc822", resumable=True)
 
 
 def label_ids(svc, names: list[str], create: bool) -> list[str]:
@@ -137,6 +155,7 @@ def main() -> int:
         c.add_argument("--cc")
         c.add_argument("--bcc")
         c.add_argument("--reply")
+        c.add_argument("--attach", action="append", default=[])
         if name == "send":
             c.add_argument("--draft")
     lb = sub.add_parser("label", add_help=False)
@@ -186,19 +205,19 @@ def main() -> int:
     if a.cmd in ("draft", "send"):
         if not a.to:
             raise cc.CCError(cc.EX_USAGE, "--to is required")
-        msg = compose(svc, a)
+        msg, raw = compose(svc, a)
         if a.cmd == "draft":
-            d = svc.drafts().create(userId="me", body={"message": msg}).execute()
+            d = svc.drafts().create(userId="me", body={"message": msg}, media_body=upload(raw)).execute()
             print(f"draft {d['id']} (message {d['message']['id']}) — send it with: gmail send --draft {d['id']}")
         else:
-            sent = svc.messages().send(userId="me", body=msg).execute()
+            sent = svc.messages().send(userId="me", body=msg, media_body=upload(raw)).execute()
             print(f"sent {sent['id']} (thread {sent['threadId']})")
         return 0
     if a.cmd == "label":
         if not a.add and not a.remove:
             raise cc.CCError(cc.EX_USAGE, "give --add and/or --remove")
-        body = {"addLabelIds": label_ids(svc, a.add, a.create), "removeLabelIds": label_ids(svc, a.remove, False)}
-        svc.messages().batchModify(userId="me", body={"ids": a.ids, **body}).execute()
+        change = {"addLabelIds": label_ids(svc, a.add, a.create), "removeLabelIds": label_ids(svc, a.remove, False)}
+        svc.messages().batchModify(userId="me", body={"ids": a.ids, **change}).execute()
         print(f"labelled {len(a.ids)} message(s): +{','.join(a.add) or '-'} -{','.join(a.remove) or '-'}")
         return 0
 
@@ -224,5 +243,15 @@ def main() -> int:
     return 0
 
 
+def run() -> int:
+    """main(), with a Google API error as one line and exit 1 instead of a traceback."""
+    from googleapiclient.errors import HttpError
+
+    try:
+        return main()
+    except HttpError as e:
+        raise cc.CCError(cc.EX_FAIL, f"Google API {e.status_code}: {e.reason}") from None
+
+
 if __name__ == "__main__":
-    cc.run_main(main)
+    cc.run_main(run)
