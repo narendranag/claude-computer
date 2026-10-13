@@ -16,8 +16,21 @@ which commits) only when Google issues a new refresh token, and after the first 
 from __future__ import annotations
 
 import json
+import socket
 
 import cc
+
+# IPv4 first. httplib2 connects to the first address it is given and gives up on a timeout, so
+# on a network where IPv6 resolves but has no route, every call hung. IPv6 is still tried,
+# after IPv4. Patched here because every wrapper that talks to Google imports this module.
+_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_first(*args, **kwargs):
+    return sorted(_getaddrinfo(*args, **kwargs), key=lambda a: a[0] != socket.AF_INET)
+
+
+socket.getaddrinfo = _ipv4_first
 
 # What one sign-in grants. Changing this list makes the next run ask for consent again
 # (credentials() notices the stored token lacks a scope). each scope is annotated with what needs it.
