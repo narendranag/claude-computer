@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Fixed
+
+- **`vault-setup` restores what a fresh clone of the vault is missing, and never deletes a plugin's settings.** The vault commits each plugin's `manifest.json` and `data.json` but ignores its code, so on a second machine every plugin looked "already installed" with no `main.js` and Obsidian loaded nothing. A plugin now counts as installed only when its code is there. Every id in `.obsidian/community-plugins.json` with a committed manifest — not just obsidian-git, dataview and templater — gets the code for that manifest's version (the release tagged `<v>` or `v<v>`, else the latest, said so), and the committed manifest is kept. The theme named in `appearance.json` is fetched from Obsidian's theme registry when its `theme.css` is missing. Files are moved into the plugin's folder one by one, so `--upgrade` no longer deletes `data.json`, as it did. `tests/vault-setup.sh` covers the fresh clone, the theme and settings across `--upgrade`.
+
 ## [0.6.0] — 2026-10-13
 
 ### Migrating from 0.5
@@ -72,7 +76,6 @@ On each machine, after pulling this release:
 
 ### Fixed
 
-- **`vault-setup` restores what a fresh clone of the vault is missing, and never deletes a plugin's settings.** The vault commits each plugin's `manifest.json` and `data.json` but ignores its code, so on a second machine every plugin looked "already installed" with no `main.js` and Obsidian loaded nothing. A plugin now counts as installed only when its code is there. Every id in `.obsidian/community-plugins.json` with a committed manifest — not just obsidian-git, dataview and templater — gets the code for that manifest's version (the release tagged `<v>` or `v<v>`, else the latest, said so), and the committed manifest is kept. The theme named in `appearance.json` is fetched from Obsidian's theme registry when its `theme.css` is missing. Files are moved into the plugin's folder one by one, so `--upgrade` no longer deletes `data.json`, as it did. `tests/vault-setup.sh` covers the fresh clone, the theme and settings across `--upgrade`.
 - **`gmail` reports a Google API error in one line** (`Google API 400: Invalid ids value`, exit 1) instead of a traceback.
 - **The Google wrappers no longer hang where IPv6 resolves but has no route.** httplib2 connects to the first address it gets and waits for the timeout; `lib/google_auth.py` now orders IPv4 addresses first, and IPv6 is still tried after them.
 - **`setup-tools.sh autoupdate` works on a freshly erased Mac**: it creates `~/Library/LaunchAgents`, which `brew autoupdate start` needs and won't create.
