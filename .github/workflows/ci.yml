@@ -111,6 +111,10 @@ jobs:
       - name: capture matrix
         run: ./tests/capture.sh
 
+      # bin/template-pull against a throwaway template and instance; no network.
+      - name: template-pull matrix
+        run: ./tests/template-pull.sh
+
       # bin/analytics, offline: plans only, no Google call.
       - name: analytics matrix
         run: ./tests/analytics.sh

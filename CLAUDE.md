@@ -57,3 +57,4 @@ You are the operator for this user's machines. This repo is the shared brain for
 | `docs/machines/`                              | one file per machine                                                                |
 | `CHANGELOG.md`                                | what changed between template versions                                              |
 | `UPSTREAM`                                    | the template's URL, used by `/setup` and `/upstream` to set the fetch-only remote   |
+| `.template-version`                           | the template release this instance is on; `bin/template-pull` reads and updates it  |

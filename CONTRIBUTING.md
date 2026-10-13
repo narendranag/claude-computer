@@ -70,3 +70,11 @@ Renaming things, restructuring the folder layout, or swapping a default because 
 One change per PR. Conventional commit subjects (`fix:`, `feat:`, `docs:`, `ci:`). Add a line under `## [Unreleased]` in `CHANGELOG.md`. Say what you tested and what you only reasoned about — this repo runs commands on people's machines, and a guess presented as a test is worse than an untested patch.
 
 Security problems do not go in a pull request: see [`SECURITY.md`](SECURITY.md).
+
+## Releasing
+
+For the maintainer. A release is one PR, then a tag:
+
+1. `CHANGELOG.md`: `## [Unreleased]` becomes `## [X.Y.Z] — YYYY-MM-DD` above a fresh empty `## [Unreleased]`, with a `### Migrating from <previous>` section for anything an instance must do by hand; update the compare links at the bottom.
+2. `.template-version` → `vX.Y.Z`, and `VERSION` in `install.sh` → `X.Y.Z`. `tests/template-pull.sh` fails until the three agree.
+3. After the merge: `git tag vX.Y.Z <merge commit> && git push origin vX.Y.Z`. Instances see it in `template-pull`.
