@@ -31,6 +31,9 @@ The vault's layout changes: `people/` and `projects/` at the root move into `mem
 
 - **`tasks-sync` writes hubs in `memory/projects/`** (a hub for every brain with a GitHub remote, created if missing), and `maps/tasks.md` shows only what needs eyes: Unassigned, overdue, Now, and one line per brain. A hub whose checkout has gone gets its Tasks block frozen and is listed under "Hubs to close" for `/review`; a damaged block heals on the next run.
 - `/archive` and `/graduate` close or update the project's hub (a fresh snapshot, `status`, `ended`, the Tasks block frozen); `/today` keeps the night shift's `## Overnight`; `schedule`'s daily note keeps it too.
+### Fixed
+
+- **`vault-setup` restores what a fresh clone of the vault is missing, and never deletes a plugin's settings.** The vault commits each plugin's `manifest.json` and `data.json` but ignores its code, so on a second machine every plugin looked "already installed" with no `main.js` and Obsidian loaded nothing. A plugin now counts as installed only when its code is there. Every id in `.obsidian/community-plugins.json` with a committed manifest — not just obsidian-git, dataview and templater — gets the code for that manifest's version (the release tagged `<v>` or `v<v>`, else the latest, said so), and the committed manifest is kept. The theme named in `appearance.json` is fetched from Obsidian's theme registry when its `theme.css` is missing. Files are moved into the plugin's folder one by one, so `--upgrade` no longer deletes `data.json`, as it did. `tests/vault-setup.sh` covers the fresh clone, the theme and settings across `--upgrade`.
 
 ## [0.6.0] — 2026-10-13
 

@@ -17,7 +17,9 @@
 # Cases: (i) a fresh vault · (ii) running it again is a no-op · (iii) a directory that is not a
 # vault is refused · (iv) an existing community-plugins.json is merged and an existing app.json
 # kept · (v) a manifest whose id is wrong installs nothing · (vi) --dry-run touches nothing ·
-# (vii) --create-remote refuses a public repo · (viii) --upgrade re-fetches.
+# (vii) --create-remote refuses a public repo · (viii) --upgrade re-fetches · (ix) a fresh clone: manifests without code get the
+# code for their pinned version, data.json and the manifest are kept, other enabled plugins and the
+# theme are restored, and --upgrade keeps settings.
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -64,6 +66,9 @@ check_exit() { # check_exit <want> <got>
 contains() { # contains <file> <needle>
   if grep -qF -- "$2" "$1"; then ok "says: $2"; else bad "output has no '$2'"; fi
 }
+lacks() { # lacks <file> <needle>
+  if grep -qF -- "$2" "$1"; then bad "output has '$2'"; else ok "does not say: $2"; fi
+}
 log_lacks() { # log_lacks <logfile> <needle>
   if grep -qF -- "$2" "$1"; then bad "IT RAN: '$2'"; else ok "did not run: $2"; fi
 }
@@ -95,7 +100,14 @@ cat > "$WORK/community-plugins.json" <<'EOF'
   {"id":"omnisearch","name":"Omnisearch","repo":"scambier/obsidian-omnisearch"},
   {"id":"dataview","name":"Dataview","repo":"blacksmithgu/obsidian-dataview"},
   {"id":"obsidian-git","name":"Git","repo":"Vinzent03/obsidian-git"},
-  {"id":"templater-obsidian","name":"Templater","repo":"SilentVoid13/Templater"}
+  {"id":"templater-obsidian","name":"Templater","repo":"SilentVoid13/Templater"},
+  {"id":"calendar","name":"Calendar","repo":"liamcain/obsidian-calendar-plugin"}
+]
+EOF
+cat > "$WORK/community-css-themes.json" <<'EOF'
+[
+  {"name":"Things","repo":"colineckert/obsidian-things"},
+  {"name":"Minimal","repo":"kepano/obsidian-minimal"}
 ]
 EOF
 
@@ -117,14 +129,25 @@ id_of() {
     *obsidian-git*) echo obsidian-git ;;
     *dataview*)     echo dataview ;;
     *Templater*)    echo templater-obsidian ;;
+    *calendar*)     echo calendar ;;
     *)              echo unknown ;;
   esac
 }
 case "$url" in
   *community-plugins.json)
     cat "$CC_TEST_REGISTRY" | emit ;;
+  *community-css-themes.json)
+    cat "$CC_TEST_THEMES" | emit ;;
   */releases/latest)
     printf '{"tag_name":"%s"}\n' "${CC_TEST_TAG:-1.2.3}" | emit ;;
+  */releases/tags/v*)
+    exit 22 ;;
+  */releases/tags/*)
+    printf '{"tag_name":"%s"}\n' "${url##*/}" | emit ;;
+  */obsidian-minimal/releases/download/*/theme.css)
+    printf '/* minimal */\n' | emit ;;
+  */obsidian-minimal/releases/download/*/manifest.json)
+    printf '{"name":"Minimal","version":"%s"}\n' "${CC_TEST_TAG:-1.2.3}" | emit ;;
   */releases/download/*/main.js)
     printf '// stub plugin code\n' | emit ;;
   */releases/download/*/manifest.json)
@@ -187,6 +210,7 @@ run() { # run [args…] — vault-setup in this case's world; exit status in $rc
     CC_VAULT="$VAULT" \
     CC_STUB_LOG="$LOG" \
     CC_TEST_REGISTRY="$WORK/community-plugins.json" \
+    CC_TEST_THEMES="$WORK/community-css-themes.json" \
     CC_TEST_TAG="${CC_TEST_TAG:-1.2.3}" \
     CC_TEST_BAD_ID="${CC_TEST_BAD_ID:-}" \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
@@ -337,6 +361,45 @@ else ok "no work directory in git status after --upgrade"; fi
 if git -C "$VAULT" ls-files | grep -q 'vault-setup\.'; then
   bad "a work-directory file is tracked after --upgrade"
 else ok "nothing from the work directory is tracked after --upgrade"; fi
+CC_TEST_TAG=1.2.3
+
+# =========================================================================
+case_new "a fresh clone: manifests without code get their pinned code back; settings and the theme"
+run
+check_exit 0 "$rc"
+P="$VAULT/.obsidian/plugins"
+# What a clone of a vault like this one holds: manifests and settings, no code, no theme files.
+mkdir -p "$P/calendar"
+printf '{"id":"calendar","name":"Calendar","version":"1.5.10"}\n' > "$P/calendar/manifest.json"
+printf '{"weekStart":"monday"}\n' > "$P/calendar/data.json"
+printf '{"id":"dataview","name":"Dataview","version":"0.5.68"}\n' > "$P/dataview/manifest.json"
+printf '{"refreshInterval":2500}\n' > "$P/dataview/data.json"
+rm -f "$P"/*/main.js
+jq '. + ["calendar"]' "$VAULT/.obsidian/community-plugins.json" > "$CASE/cp" && mv "$CASE/cp" "$VAULT/.obsidian/community-plugins.json"
+printf '{"cssTheme":"Minimal"}\n' > "$VAULT/.obsidian/appearance.json"
+run
+check_exit 0 "$rc"
+contains "$OUT" "dataview 0.5.68 ←"
+contains "$OUT" "(code for the committed manifest, 0.5.68)"
+contains "$OUT" "calendar 1.5.10 ←"
+lacks "$OUT" "dataview 0.5.68 — already installed"
+is_file "$P/dataview/main.js" "dataview's code"
+is_file "$P/calendar/main.js" "calendar's code"
+json_is "$P/dataview/manifest.json" '.version' '"0.5.68"' "the committed manifest is kept"
+json_is "$P/dataview/data.json" '.refreshInterval' '2500' "the plugin's settings are kept"
+json_is "$P/calendar/data.json" '.weekStart' '"monday"' "an extra plugin's settings are kept"
+contains "$P/VERSIONS.md" "| calendar | 1.5.10 |"
+is_file "$VAULT/.obsidian/themes/Minimal/theme.css" "the Minimal theme"
+contains "$OUT" "theme Minimal 1.2.3 ←"
+run
+check_exit 0 "$rc"
+contains "$OUT" "theme Minimal — already installed"
+contains "$OUT" "calendar 1.5.10 — already installed"
+CC_TEST_TAG=9.9.9
+run --upgrade
+check_exit 0 "$rc"
+json_is "$P/dataview/data.json" '.refreshInterval' '2500' "--upgrade keeps the plugin's settings"
+json_is "$P/dataview/manifest.json" '.version' '"9.9.9"' "--upgrade takes the latest"
 CC_TEST_TAG=1.2.3
 
 # =========================================================================
