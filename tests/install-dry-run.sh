@@ -311,6 +311,7 @@ contains "$D/out" "✓ Claude Code"
 contains "$D/out" "✓ git identity: A Person <you@example.com>"
 contains "$D/out" "already loads brew"
 contains "$D/out" "already installed — not adding a second copy"
+absent   "$D/out" "exec zsh -l"
 assert_no_mutation "$CC_STUB_LOG"
 
 # --------------------------------------------------------------------------
@@ -329,6 +330,7 @@ check_exit 0 $?
 contains "$D/out" "installed but not on your PATH"
 contains "$D/out" "Adding the line Homebrew asks for"
 contains "$D/out" "$D/offpath/brew shellenv"
+contains "$D/out" "exec zsh -l"     # this window can't find claude until it loads the profile
 if [ -e "$D/zprofile" ]; then bad "dry run wrote the zprofile"; else ok "left the zprofile alone"; fi
 assert_no_mutation "$CC_STUB_LOG"
 

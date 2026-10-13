@@ -1,0 +1,150 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["google-api-python-client>=2.150", "google-auth-oauthlib>=1.2"]
+# ///
+"""gtasks — Google Tasks from the command line. Markdown out by default.
+
+Usage:
+  gtasks lists [--json]                             your task lists: title, open count, id
+  gtasks list [--list NAME|ID] [--completed] [--json]
+                                                    open tasks across every list (or one); --completed adds
+                                                    finished ones. Subtasks are indented under their parent
+  gtasks handoff TASK_ID --list NAME|ID --to BRAIN  note on the task which brain now carries it ("→ BRAIN");
+                                                    the task stays open as the top-level item
+  gtasks done TASK_ID --list NAME|ID                mark a task completed (reversible in Google Tasks)
+
+Google Tasks is the high-level list you jot into from anywhere: each task starts a project or workplan in a
+brain. Handing one over writes it into that brain's TASKS.md (tagged #gtasks) and runs `handoff`; `done` waits
+until the work is. /review proposes a brain for every task not handed over yet.
+
+Auth: OAuth token shared with gcal/gmail/gdrive, kept in the secrets store (see lib/google_auth.py).
+Exit codes: 0 ok · 1 API error · 2 usage · 3 sops missing · 4 no key / not admitted · 5 credentials not set
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import google_auth  # noqa: E402
+import cc  # noqa: E402
+
+
+def tasklists(svc) -> list[dict]:
+    items, token = [], None
+    while True:
+        r = svc.tasklists().list(maxResults=100, pageToken=token).execute()
+        items += r.get("items", [])
+        token = r.get("nextPageToken")
+        if not token:
+            return items
+
+
+def pick(svc, name: str | None) -> list[dict]:
+    """One list by id or (case-insensitive) title, else all of them."""
+    lists = tasklists(svc)
+    if not name:
+        return lists
+    hit = [t for t in lists if t["id"] == name or t.get("title", "").lower() == name.lower()]
+    if not hit:
+        raise cc.CCError(cc.EX_USAGE, f"no task list {name!r} (`gtasks lists` lists them)")
+    return hit[:1]
+
+
+def tasks(svc, tl: dict, completed: bool) -> list[dict]:
+    out, token = [], None
+    while True:
+        r = svc.tasks().list(tasklist=tl["id"], maxResults=100, pageToken=token, showCompleted=completed,
+                             showHidden=completed).execute()
+        out += [{**t, "_list": tl.get("title", tl["id"])} for t in r.get("items", [])]
+        token = r.get("nextPageToken")
+        if not token:
+            return out
+
+
+def line(t: dict, indent: str) -> str:
+    box = "x" if t.get("status") == "completed" else " "
+    due = f" (due {t['due'][:10]})" if t.get("due") else ""
+    notes = " — " + t["notes"].replace("\n", " ")[:160] if t.get("notes") else ""
+    return f"{indent}- [{box}] {t.get('title') or '(no title)'}{due}{notes} `{t['id']}`"
+
+
+def show(svc, lists: list[dict], completed: bool, as_json: bool) -> int:
+    per = {tl["id"]: tasks(svc, tl, completed) for tl in lists}
+    if as_json:
+        print(json.dumps([t for ts in per.values() for t in ts], indent=2, ensure_ascii=False))
+        return 0
+    for tl in lists:
+        ts = per[tl["id"]]
+        print(f"## {tl.get('title', tl['id'])} ({len(ts)})\n")
+        if not ts:
+            print("(none)\n")
+            continue
+        top = sorted((t for t in ts if not t.get("parent")), key=lambda t: t.get("position", ""))
+        kids: dict[str, list[dict]] = {}
+        for t in ts:
+            if t.get("parent"):
+                kids.setdefault(t["parent"], []).append(t)
+        for t in top:
+            print(line(t, ""))
+            for k in sorted(kids.get(t["id"], []), key=lambda k: k.get("position", "")):
+                print(line(k, "  "))
+        print()
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="gtasks", add_help=False)
+    ap.add_argument("-h", "--help", action="store_true")
+    sub = ap.add_subparsers(dest="cmd")
+    ll = sub.add_parser("lists", add_help=False)
+    ll.add_argument("--json", action="store_true")
+    ls = sub.add_parser("list", add_help=False)
+    ls.add_argument("--list")
+    ls.add_argument("--completed", action="store_true")
+    ls.add_argument("--json", action="store_true")
+    ho = sub.add_parser("handoff", add_help=False)
+    ho.add_argument("task_id")
+    ho.add_argument("--list", required=True)
+    ho.add_argument("--to", required=True)
+    dn = sub.add_parser("done", add_help=False)
+    dn.add_argument("task_id")
+    dn.add_argument("--list", required=True)
+    try:
+        a = ap.parse_args()
+    except SystemExit:
+        return cc.EX_USAGE
+    if a.help or not a.cmd:
+        print(__doc__)
+        return cc.EX_OK if a.help else cc.EX_USAGE
+
+    svc = google_auth.service("tasks", "v1")
+    if a.cmd == "lists":
+        lists = tasklists(svc)
+        if a.json:
+            print(json.dumps(lists, indent=2, ensure_ascii=False))
+            return 0
+        for tl in lists:
+            print(f"- **{tl.get('title')}** — {len(tasks(svc, tl, False))} open — `{tl['id']}`")
+        return 0
+    if a.cmd == "list":
+        return show(svc, pick(svc, a.list), a.completed, a.json)
+
+    tl = pick(svc, a.list)[0]
+    if a.cmd == "handoff":
+        notes = svc.tasks().get(tasklist=tl["id"], task=a.task_id).execute().get("notes", "")
+        mark = f"→ {a.to}"
+        if mark not in notes:
+            notes = f"{mark}\n{notes}".strip()
+        t = svc.tasks().patch(tasklist=tl["id"], task=a.task_id, body={"notes": notes}).execute()
+        print(f"handed off: {t.get('title')} {mark}")
+        return 0
+    t = svc.tasks().patch(tasklist=tl["id"], task=a.task_id, body={"status": "completed"}).execute()
+    print(f"done: {t.get('title')} ({tl.get('title')})")
+    return 0
+
+
+if __name__ == "__main__":
+    cc.run_main(main)
