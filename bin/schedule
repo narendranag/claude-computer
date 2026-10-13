@@ -8,6 +8,8 @@
 #
 # Jobs (edit the table below to add one; then record it in docs/machines/<host>.md):
 #   tasks-sync       hourly           vault task copies
+#   capture          every 5 min      your Telegram messages to the bot + Gmail label `vault` → vault inbox/
+#                                     (one machine only: Telegram gives each message to the first that asks)
 #   resources-sync   hourly           encrypted two-way sync of ~/resources
 #   feeds-sync       daily 06:00      reading digest
 #   daily-note       daily 06:30      draft today's note with `claude -p`, unattended: the vault is
@@ -26,7 +28,7 @@ cc_is_macos || cc_die "$EX_DEPS" "launchd is macOS-only; on Linux use a systemd 
 AGENTS="$HOME/Library/LaunchAgents"
 LOGS="$HOME/Library/Logs/claude-computer"
 PREFIX="local.claude-computer"
-JOBS="tasks-sync resources-sync feeds-sync daily-note map-check transcripts-sync library-push"
+JOBS="tasks-sync capture resources-sync feeds-sync daily-note map-check transcripts-sync library-push"
 
 # The job list lives twice — the table in the header above, which `--help` prints, and JOBS.
 # Two copies drift, so `list` diffs them and fails instead of quietly telling you half the truth.
@@ -44,6 +46,7 @@ job_def() {
   local b="$CC_ROOT/bin"
   case "$1" in
     tasks-sync)     echo "interval:3600|$b/tasks-sync" ;;
+    capture)        echo "interval:300|$b/capture" ;;
     resources-sync) echo "interval:3600|$b/resources-sync" ;;
     feeds-sync)     echo "daily:06:00|$b/feeds-sync" ;;
     # The one job that runs Claude with nobody watching, so it is fenced in twice:

@@ -8,7 +8,7 @@ System context: `~/claude-computer/docs/`. Tasks are **not** kept here — see R
 
 | Folder               | What goes in                                                                                           | Who writes                                                                    |
 | -------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `inbox/`             | everything lands here: web clips, quick notes; `quick.md` for short dictation                          | anyone; Claude empties it (`/inbox`)                                          |
+| `inbox/`             | everything lands here: web clips, quick notes, phone and email (`capture`); `quick.md` for dictation   | anyone, `capture`; Claude empties it (`/inbox`)                               |
 | `inbox/transcripts/` | one note per recording: meetings, files, URLs, podcasts (`type: transcript`, `status: unprocessed`)    | `transcripts-sync`, `macparakeet-cli`; Claude processes them (`/transcripts`) |
 | `daily/`             | one note per day, `YYYY-MM-DD.md`, drafted from tasks                                                  | scheduled draft + `/today`; the human adds                                    |
 | `notes/`             | **flat.** atomic ideas, meeting notes, decisions. No subfolders.                                       | Claude files, the human writes                                                |
@@ -59,6 +59,7 @@ Enforce it when filing. Fix it when you see it wrong.
 - **Files, URLs, podcasts**: `macparakeet-cli transcribe <input> --no-history --output-dir ~/vault/inbox/transcripts --format transcript`.
 - **Short dictation** goes into `inbox/quick.md`; `/inbox` splits it into atomic notes and routes any tasks.
 - **Web clips**: Obsidian Web Clipper, saving to `inbox/`.
+- **Phone and email**: `capture` (scheduled on one machine) brings your Telegram messages to the bot — voice notes transcribed on that Mac — and every Gmail message you label `vault` into `inbox/`.
 
 ## Overflow
 

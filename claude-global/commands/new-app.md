@@ -13,3 +13,5 @@ The idea: $ARGUMENTS
    - `DECISIONS.md`: the target choice and why.
 4. If it needs analytics/errors, note the PostHog key to add as `posthog.<name>` — I run `secrets set posthog.<name>` in a terminal. The app reads it through `.envrc` with `eval "$(secrets env --only POSTHOG_KEY=posthog.<name>)"` (direnv), or its dev command runs under `secrets exec --only POSTHOG_KEY=posthog.<name> -- <cmd>`.
 5. Run `~/claude-computer/bin/tasks-sync` so the vault hub appears. Commit, push, and tell me the path and repo URL.
+
+**Set up, then stop.** This session builds the skeleton only: the scaffold, the repo, and the brain above. Plans, research, drafts and code are the project's own work, done in a session started in it (`cd <path> && claude`). Write them into `## Now` instead of doing them here.

@@ -107,6 +107,10 @@ jobs:
       - name: dashboard matrix
         run: ./tests/dashboard.sh
 
+      # bin/capture, offline: Telegram, Gmail and the transcriber are stubs.
+      - name: capture matrix
+        run: ./tests/capture.sh
+
       # bin/analytics, offline: plans only, no Google call.
       - name: analytics matrix
         run: ./tests/analytics.sh

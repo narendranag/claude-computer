@@ -1,6 +1,6 @@
-"""OAuth for the gcal / gmail / gdrive wrappers.
+"""OAuth for the gcal / gmail / gdrive / gtasks wrappers (and analytics).
 
-One OAuth client (Desktop app) and one token shared by all three wrappers, both in the
+One OAuth client (Desktop app) and one token shared by every Google wrapper, both in the
 secrets store (docs/SECRETS.md):
   google.credentials   the downloaded credentials.json
   google.token         the authorised token (written by the first run)
@@ -16,8 +16,21 @@ which commits) only when Google issues a new refresh token, and after the first 
 from __future__ import annotations
 
 import json
+import socket
 
 import cc
+
+# IPv4 first. httplib2 connects to the first address it is given and gives up on a timeout, so
+# on a network where IPv6 resolves but has no route, every call hung. IPv6 is still tried,
+# after IPv4. Patched here because every wrapper that talks to Google imports this module.
+_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_first(*args, **kwargs):
+    return sorted(_getaddrinfo(*args, **kwargs), key=lambda a: a[0] != socket.AF_INET)
+
+
+socket.getaddrinfo = _ipv4_first
 
 # What one sign-in grants. Changing this list makes the next run ask for consent again
 # (credentials() notices the stored token lacks a scope). each scope is annotated with what needs it.
@@ -31,6 +44,7 @@ SCOPES = [
     _G + "spreadsheets",
     _G + "presentations",
     _G + "contacts",                # People API
+    _G + "tasks",                   # gtasks: read lists, note hand-offs, mark tasks done
     _G + "chat.messages",           # Google Chat (Workspace accounts only, Google says)
     _G + "chat.spaces.readonly",
     _G + "meetings.space.created",  # Meet: create spaces, read their conferences
