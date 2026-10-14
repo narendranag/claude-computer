@@ -9,7 +9,8 @@
 # Cases: (1) the default scope (memory/ and sources/repos/) gives exactly the expected findings, exit 1 ·
 # (2) --json carries the same findings · (3) PATHs narrow the check, and a duplicate is still found
 # against notes outside them · (4) a clean subset exits 0; _templates/ is never checked · (5) usage and
-# a missing vault
+# a missing vault · (6) a property its type doesn't define is a warning, with the nearest defined one,
+# and never changes the exit code; generated notes are exempt; .vault-lint.yaml adds keys on purpose
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -99,6 +100,36 @@ run --vault "$WORK/no-such-vault"
 check_exit 5 $?
 run --vault "$FIX" no/such/path.md
 check_exit 2 $?
+
+case_new "a property its type doesn't define: a warning"
+V="$WORK/vault6"
+cp -R "$FIX" "$V"
+C="$V/memory/commitments"
+swap() { # awk -v expands \n in "to", the same in BSD awk and gawk
+  awk -v from="$1" -v to="$2" '$0 == from { print to; next } { print }' "$C/2026-10-15-send-proposal.md"; }
+swap 'due: 2026-10-15' 'dropped_on: 2026-10-16' > "$C/2026-10-16-typo.md"
+swap 'due: 2026-10-15' 'priority: high\nmood: calm' > "$C/2026-10-17-extras.md"
+swap 'type: commitment' 'type: commitment\ngenerated: some-script\nwhatever: 1' > "$C/2026-10-18-generated.md"
+run --vault "$V" memory/commitments/2026-10-16-typo.md memory/commitments/2026-10-17-extras.md memory/commitments/2026-10-18-generated.md
+check_exit 0 $?
+contains "$OUT" "2026-10-16-typo.md:8: warning: unknown-property: commitment has \`dropped_on\`, which the schema doesn't define for it (did you mean \`done_on\`?)"
+contains "$OUT" "2026-10-17-extras.md:8: warning: unknown-property: commitment has \`priority\`"
+contains "$OUT" "0 errors in 0 notes; 3 warnings"
+lacks "$OUT" "2026-10-18-generated.md"
+run --vault "$V" --json memory/commitments/2026-10-16-typo.md
+check_exit 0 $?
+if [ "$(jq -c '[(.errors|length), (.warnings|length), .warnings[0].rule]' "$OUT")" = '[0,1,"unknown-property"]' ]; then ok "--json: no errors, one warning"
+else bad "--json warnings: $(jq -c '{errors, warnings}' "$OUT")"; fi
+printf 'extra_properties:\n  commitment: [priority]\n  "*": [mood]\n' > "$V/.vault-lint.yaml"
+run --vault "$V" memory/commitments/2026-10-16-typo.md memory/commitments/2026-10-17-extras.md
+check_exit 0 $?
+lacks "$OUT" "2026-10-17-extras.md"
+contains "$OUT" "2026-10-16-typo.md:8: warning: unknown-property"
+contains "$OUT" "; 1 warning"
+printf 'extra_properties: [priority]\n' > "$V/.vault-lint.yaml"
+run --vault "$V" memory/commitments/2026-10-16-typo.md
+check_exit 2 $?
+contains "$OUT" "extra_properties is a mapping"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]

@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- **`vault-lint` warns about a property a note's type doesn't define**, naming the nearest one it does: a commitment's `dropped_on` gets "did you mean `done_on`?". A warning, not an error: it prints and appears under `warnings` in `--json`, and never changes the exit code, so the night shift's gate is unaffected. Notes with `generated:` and transcripts are exempt; keys you add on purpose go in the vault's `.vault-lint.yaml` (`extra_properties: {commitment: [priority], "*": [mood]}`). The person schema now lists `github` and `git_authors`, which `project-import` already read from the owner's note.
+
 ### Fixed
 
 - **`template-pull` no longer gives up on the whole release over one file.** `git apply` is all or nothing, so an instance that had taken part of a release by hand — a file the release adds already there, a file it deletes changed here — got nothing applied. Each file is now decided on its own: one you never touched takes the template's version, one you both changed merges three-way, and one that can't be merged is left as yours and listed with the command that takes the template's version. The rest of the release applies either way, and `--dry-run` reports the same lists.
