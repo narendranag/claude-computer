@@ -6,6 +6,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- `commitments brief [--days N] [--json]`: open commitments overdue and due in the next N days (default 7), and the people met yesterday from `memory/meetings/` attendees, the owner left out. `commitments list` gains `--overdue`, `--due-within N` and `--date`.
+
+### Changed
+
+- `/today` and the `daily-note` job add **Commitments** and **Met yesterday** to the daily note from `commitments brief`, as the vault's `CLAUDE.md` promised; `_templates/daily.md` has the two headings. The job's `--allowedTools` admits `commitments brief` (read-only); reinstall it with `schedule install daily-note`.
+- `/review` flags commitments past due (and due within a week, or open with no due date for 30 days) and proposes done, dropped or a new date for each, closing through `commitments set --via review`.
+
 ### Fixed
 
 - **`template-pull` no longer gives up on the whole release over one file.** `git apply` is all or nothing, so an instance that had taken part of a release by hand — a file the release adds already there, a file it deletes changed here — got nothing applied. Each file is now decided on its own: one you never touched takes the template's version, one you both changed merges three-way, and one that can't be merged is left as yours and listed with the command that takes the template's version. The rest of the release applies either way, and `--dry-run` reports the same lists.

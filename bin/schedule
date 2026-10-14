@@ -13,7 +13,8 @@
 #   resources-sync   hourly           encrypted two-way sync of ~/resources
 #   feeds-sync       daily 06:00      reading digest
 #   daily-note       daily 06:30      draft today's note with `claude -p`, unattended: the vault is
-#                                     the working directory and --allowedTools is read/edit + git commit
+#                                     the working directory and --allowedTools is read/edit, `commitments
+#                                     brief` (read-only) + git commit
 #   vault-nightly    daily 04:30      transcripts + inbox into the vault's memory graph with `claude -p`, in a
 #                                     worktree, landed only past the vault-lint gate (bin/vault-nightly)
 #   map-check        daily 09:00      drift report → tg-send only when there is drift
@@ -53,10 +54,11 @@ job_def() {
     feeds-sync)     echo "daily:06:00|$b/feeds-sync" ;;
     # The one job that runs Claude with nobody watching, so it is fenced in twice:
     # the working directory is the vault (Claude's workspace, and the only tree it may
-    # edit), and --allowedTools is the shortest list that can draft and commit a note.
+    # edit), and --allowedTools is the shortest list that can draft and commit a note
+    # (`commitments brief` only reads: the note's Commitments and Met yesterday).
     # Anything not listed — every other Bash command, WebFetch, Task — is refused
     # outright, and there is no terminal to approve it.
-    daily-note)     echo "daily:06:30|cd \$HOME/vault && claude -p 'Draft the daily note for today, per /today steps 1-2 only. If it exists, keep its ## Overnight section exactly as it is. Edit only files under ~/vault. Commit the vault.' --permission-mode auto --allowedTools 'Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git add:*),Bash(git commit:*)'" ;;
+    daily-note)     echo "daily:06:30|cd \$HOME/vault && claude -p 'Draft the daily note for today, per /today steps 1-2 only. If it exists, keep its ## Overnight section exactly as it is. Edit only files under ~/vault. Commit the vault.' --permission-mode auto --allowedTools 'Read,Edit,Write,Glob,Grep,Bash(~/claude-computer/bin/commitments brief:*),Bash($b/commitments brief:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*)'" ;;
     # The other unattended Claude: bin/vault-nightly fences it itself (a worktree, dontAsk, its own
     # --allowedTools) and lands nothing that fails the vault-lint gate.
     vault-nightly)  echo "daily:04:30|$b/vault-nightly" ;;

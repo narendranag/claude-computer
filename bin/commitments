@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""commitments — the vault's commitments: list them, and close or reopen one.
+"""commitments — the vault's commitments: list them, brief the day on them, and close or reopen one.
 
 A commitment is a note in <vault>/memory/commitments/ (the vault's CLAUDE.md, "Properties"): `from`, `to`,
 `status` (open · done · dropped), `made_in`, optional `due`, `done_on`, `task`. This script is the one place
@@ -13,16 +13,24 @@ Usage:
   commitments list [--all] [--json]       open commitments (--all: every one), the owner's first. The
                                           owner is the person note with `me: true`, else the one named
                                           after `git config user.name`
+       [--overdue] [--due-within N]       only the open ones past due, or due in the next N days (overdue
+                                          included): what /review flags
+  commitments brief [--days N] [--json]   what the daily note and /today need from memory/: open
+                                          commitments overdue, open ones due in the next N days (default
+                                          7), and the people met yesterday (the attendees, the owner left
+                                          out, of meetings in memory/meetings/ dated the day before)
   commitments set <id> done|dropped|open [--via NAME] [--no-commit]
                                           change one: status and done_on, a dated `## Log` bullet citing
                                           sources/confirmations/<date>-<via>.md (created or appended:
                                           the owner's word is the evidence), then a vault commit
 
   --vault DIR   the vault (default $CC_VAULT, else ~/vault)
+  --date D      count from this day instead of today (YYYY-MM-DD): for `list` and `brief`
   --via NAME    where the owner said so, for the confirmation note (default: cli)
 
 <id> is the note's file name without .md. `list --json` gives, per commitment: id, title, status, mine (the
-owner owes it), from, to (names), due, done_on, overdue, meeting, meeting_date, task.
+owner owes it), from, to (names), due, done_on, overdue, meeting, meeting_date, task. `brief --json` gives
+date, overdue and due_soon (lists of those), and met: {date, people: [{id, name, meetings: [{id, title}]}]}.
 
 Exit codes: 0 ok · 1 failed (a git commit) · 2 usage, or no such commitment · 5 no vault
 """
@@ -54,6 +62,21 @@ def front(text: str) -> dict[str, str]:
         if sep and not line.startswith((" ", "-")):
             out[k.strip()] = v.strip().strip('"').strip("'")
     return out
+
+
+def links(text: str, key: str) -> list[str]:
+    """Link targets of one list property, flow (`k: ["[[a]]", "[[b]]"]`) or block (`k:` then `  - "[[a]]"`)."""
+    m = FM_RE.match(text)
+    vals, inside = [], False
+    for line in (m.group(1).splitlines() if m else []):
+        if line.startswith(f"{key}:"):
+            vals.append(line.partition(":")[2])
+            inside = True
+        elif inside and line.startswith((" ", "-")):
+            vals.append(line)
+        else:
+            inside = False
+    return [t.strip() for t in LINK_RE.findall(" ".join(vals))]
 
 
 def link_target(v: str) -> str:
@@ -130,23 +153,74 @@ class Vault:
             return []
         return [self.read(f, today) for f in sorted(self.dir.glob("*.md"))]
 
+    def met(self, day: dt.date) -> list[dict]:
+        """People in meetings dated `day` (property `date`, else the file name's), the owner left out,
+        in order of first appearance; each with the meetings they were in."""
+        people: dict[str, dict] = {}
+        for f in sorted((self.root / "memory" / "meetings").glob("*/*.md")):
+            text = f.read_text(encoding="utf-8")
+            if (front(text).get("date") or f.stem[:10]) != day.isoformat():
+                continue
+            mid = str(f.relative_to(self.root).with_suffix(""))
+            title, _ = self.meeting(mid)
+            for p in links(text, "attendees"):
+                if p != self.owner:
+                    people.setdefault(p, {"id": p, "name": self.name(p), "meetings": []})["meetings"].append(
+                        {"id": mid, "title": title})
+        return list(people.values())
+
 
 def sort_key(c: dict) -> tuple:
     return (not c["mine"], c["status"] != "open", c["due"] or "9999", c["meeting_date"], c["id"])
 
 
-def cmd_list(v: Vault, show_all: bool, as_json: bool) -> int:
-    items = sorted((c for c in v.all(dt.date.today()) if show_all or c["status"] == "open"), key=sort_key)
+def line(c: dict) -> str:
+    who = f"→ {c['to']}" if c["mine"] else f"{c['from']} →"
+    when = f"due {c['due']}" + (" LATE" if c["overdue"] else "") if c["due"] else f"since {c['meeting_date']}"
+    mark = {"open": " ", "done": "x", "dropped": "-"}.get(c["status"], "?")
+    return f"[{mark}] {c['title']}  ({who}; {when})  {c['id']}"
+
+
+def due_by(c: dict, last: dt.date) -> bool:
+    return c["status"] == "open" and bool(c["due"]) and c["due"] <= last.isoformat()
+
+
+def cmd_list(v: Vault, today: dt.date, show_all: bool, as_json: bool, overdue: bool, within: int | None) -> int:
+    items = [c for c in v.all(today) if show_all or c["status"] == "open"]
+    if overdue:
+        items = [c for c in items if c["overdue"]]
+    if within is not None:
+        items = [c for c in items if due_by(c, today + dt.timedelta(days=within))]
+    items.sort(key=sort_key)
     if as_json:
         print(json.dumps(items, ensure_ascii=False, indent=1))
         return 0
     for c in items:
-        who = f"→ {c['to']}" if c["mine"] else f"{c['from']} →"
-        when = f"due {c['due']}" + (" LATE" if c["overdue"] else "") if c["due"] else f"since {c['meeting_date']}"
-        mark = {"open": " ", "done": "x", "dropped": "-"}.get(c["status"], "?")
-        print(f"[{mark}] {c['title']}  ({who}; {when})  {c['id']}")
+        print(line(c))
     mine = sum(c["mine"] and c["status"] == "open" for c in items)
     print(f"commitments: {sum(c['status'] == 'open' for c in items)} open, {mine} of them yours")
+    return 0
+
+
+def cmd_brief(v: Vault, today: dt.date, days: int, as_json: bool) -> int:
+    items = sorted((c for c in v.all(today) if c["status"] == "open"), key=sort_key)
+    overdue = [c for c in items if c["overdue"]]
+    soon = [c for c in items if not c["overdue"] and due_by(c, today + dt.timedelta(days=days))]
+    yday = today - dt.timedelta(days=1)
+    met = v.met(yday)
+    if as_json:
+        print(json.dumps({"date": today.isoformat(), "days": days, "overdue": overdue, "due_soon": soon,
+                          "met": {"date": yday.isoformat(), "people": met}}, ensure_ascii=False, indent=1))
+        return 0
+    print(f"Overdue ({len(overdue)})")
+    for c in overdue:
+        print("  " + line(c))
+    print(f"Due by {(today + dt.timedelta(days=days)).isoformat()} ({len(soon)})")
+    for c in soon:
+        print("  " + line(c))
+    print(f"Met on {yday.isoformat()} ({len(met)})")
+    for p in met:
+        print(f"  {p['name']}  ({'; '.join(m['title'] for m in p['meetings'])})  {p['id']}")
     return 0
 
 
@@ -231,6 +305,10 @@ def main() -> int:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--via", default="cli")
     ap.add_argument("--no-commit", action="store_true")
+    ap.add_argument("--overdue", action="store_true")
+    ap.add_argument("--due-within", type=int, metavar="N")
+    ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--date")
     try:
         a = ap.parse_args()
     except SystemExit:
@@ -242,11 +320,22 @@ def main() -> int:
     if not v.root.is_dir():
         print(f"commitments: no vault at {v.root}", file=sys.stderr)
         return 5
+    try:
+        today = dt.date.fromisoformat(a.date) if a.date else dt.date.today()
+    except ValueError:
+        print(f"commitments: --date wants YYYY-MM-DD, got {a.date}", file=sys.stderr)
+        return 2
+    if (a.due_within is not None and a.due_within < 0) or a.days < 0:
+        print("commitments: --due-within and --days want a number of days, 0 or more", file=sys.stderr)
+        return 2
     if a.cmd == "list" and not a.args:
-        return cmd_list(v, a.all, a.json)
+        return cmd_list(v, today, a.all, a.json, a.overdue, a.due_within)
+    if a.cmd == "brief" and not a.args:
+        return cmd_brief(v, today, a.days, a.json)
     if a.cmd == "set" and len(a.args) == 2:
         return cmd_set(v, a.args[0], a.args[1], a.via, not a.no_commit)
-    print("commitments: usage: commitments list [--all] [--json] | set <id> done|dropped|open", file=sys.stderr)
+    print("commitments: usage: commitments list [--all] [--json] [--overdue] [--due-within N] | brief [--days N]"
+          " [--json] | set <id> done|dropped|open", file=sys.stderr)
     return 2
 
 

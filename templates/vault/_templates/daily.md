@@ -10,6 +10,10 @@ tags: [daily]
 
 ## Due this week
 
+## Commitments
+
+## Met yesterday
+
 ## Closed yesterday
 
 ## Reading
