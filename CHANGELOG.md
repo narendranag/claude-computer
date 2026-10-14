@@ -30,6 +30,7 @@ The vault's layout changes: `people/` and `projects/` at the root move into `mem
 ### Changed
 
 - **`tasks-sync` writes hubs in `memory/projects/`** (a hub for every brain with a GitHub remote, created if missing), and `maps/tasks.md` shows only what needs eyes: Unassigned, overdue, Now, and one line per brain. A hub whose checkout has gone gets its Tasks block frozen and is listed under "Hubs to close" for `/review`; a damaged block heals on the next run.
+- **`rclone` asks only for what writes.** `Bash(rclone:*)` on the ask list becomes one ask per verb that writes, configures or serves (copy, sync, bisync, move, delete, purge, mkdir, config, serve, mount, rc, link, backend, selfupdate, authorize and the rest), plus `Bash(rclone -*)` for a flag before the verb, which the per-verb rules can't see. Listings (`lsf`, `lsjson`, `lsl`, `size`, `check`) are allowed, as are `vault-lint`, `gmail search`, `gmail get`, `shellcheck`, `launchctl list` and `defaults read`. `rclone.conf` stays denied to `Read`.
 - `/archive` and `/graduate` close or update the project's hub (a fresh snapshot, `status`, `ended`, the Tasks block frozen); `/today` keeps the night shift's `## Overnight`; `schedule`'s daily note keeps it too.
 
 ### Fixed
