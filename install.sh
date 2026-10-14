@@ -18,7 +18,7 @@
 # (the template itself, or a public fork).
 set -euo pipefail
 
-VERSION="0.6.0"
+VERSION="0.7.0"
 TEMPLATE="${CC_INSTALL_TEMPLATE:-narendranag/claude-computer}"
 BREW_INSTALLER_URL="https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
 
