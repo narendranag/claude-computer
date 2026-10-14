@@ -140,7 +140,7 @@ brew install --cask claude-code && claude
 Log in, and check the status line reads **⏵⏵ auto mode on** before the first prompt (Shift+Tab cycles modes). (Anthropic also ships a native installer, `curl -fsSL https://claude.ai/install.sh | bash`, which updates itself. I install through Homebrew so Claude Code lives in the Brewfile like everything else; the daily `brew autoupdate` agent keeps it current.)
 
 > [!IMPORTANT]
-> This template sets `"defaultMode": "auto"` in [`claude-global/settings.json`](claude-global/settings.json), which `/setup` links to `~/.claude/settings.json` — the user-level file, the only place outside managed settings where `auto` takes effect. It is also the built-in starting mode on Pro and Max; where auto mode isn't available for your account or model, sessions start in Manual and the same ask and deny rules apply. Auto mode reduces prompts; it does not guarantee safety. The ask list, the deny list, Time Machine and your own review of anything sensitive are what make it sane.
+> This template sets `"defaultMode": "auto"` in [`claude-global/settings.json`](claude-global/settings.json), which `bin/settings-build` combines with your own `settings.overlay.json` into `~/.claude/settings.json` — the user-level file, the only place outside managed settings where `auto` takes effect. It is also the built-in starting mode on Pro and Max; where auto mode isn't available for your account or model, sessions start in Manual and the same ask and deny rules apply. Auto mode reduces prompts; it does not guarantee safety. The ask list, the deny list, Time Machine and your own review of anything sensitive are what make it sane.
 
 **Phase 2 — The handover.** Your last solo act:
 

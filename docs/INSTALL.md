@@ -109,7 +109,7 @@ The reset discards that clone's own history, which is why the machine file moves
 mv ~/sys-admin ~/claude-computer
 ```
 
-Then relink `~/.claude` — `CLAUDE.md`, `settings.json`, `commands` and `hooks` all point into the old path — which is phase 4 of `/setup`; ask Claude to redo it. Check `map-check` runs afterwards.
+Then relink `~/.claude` — `CLAUDE.md`, `commands` and `hooks` all point into the old path — which is phase 4 of `/setup`; ask Claude to redo it, and run `settings-build` from the new path. Check `map-check` runs afterwards.
 
 ## What it does, in order
 

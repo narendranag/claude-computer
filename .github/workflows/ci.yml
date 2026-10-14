@@ -129,6 +129,10 @@ jobs:
       - name: template-pull matrix
         run: ./tests/template-pull.sh
 
+      # bin/settings-build: the template's base plus an owner's overlay into ~/.claude/settings.json.
+      - name: settings-build matrix
+        run: ./tests/settings-build.sh
+
       # bin/analytics, offline: plans only, no Google call.
       - name: analytics matrix
         run: ./tests/analytics.sh
@@ -166,6 +170,9 @@ jobs:
         run: |
           set -euo pipefail
           jq -e . claude-global/settings.json > /dev/null
+          jq -e . claude-global/settings.overlay.example.json > /dev/null
+          # The overlay is the owner's: the template ships only the example, so template-pull never touches theirs.
+          test ! -e claude-global/settings.overlay.json
           # A typo in a permission rule fails open, so check the shape too.
           jq -e '.permissions.deny | type == "array" and length > 0' claude-global/settings.json > /dev/null
           jq -e '.permissions.defaultMode == "auto"' claude-global/settings.json > /dev/null

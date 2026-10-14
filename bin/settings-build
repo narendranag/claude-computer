@@ -1,0 +1,471 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""settings-build — build ~/.claude/settings.json from the template's base and this instance's overlay.
+
+  base     claude-global/settings.json          the template's. An instance never edits it, so
+                                                `template-pull` applies to it cleanly
+  overlay  claude-global/settings.overlay.json  the owner's: what this instance adds, changes and
+                                                removes. The template never ships or touches it
+                                                (it ships settings.overlay.example.json)
+  out      ~/.claude/settings.json              what Claude Code reads: a file this script writes,
+                                                not a link into the repo
+
+Claude Code merges allow, ask and deny across its settings scopes and can't take a rule away, so a
+personal setup that asks less than the template could only edit the shared file, and every release
+then conflicted there. The overlay says the same thing in a file of its own:
+
+  { "set":   { "theme": "dark", "env": { "CC_RM_GUARD": "off" } },
+    "unset": [ "statusLine", "env.NO_COLOR" ],
+    "allow": { "add": [ "Bash(git push:*)" ] },
+    "ask":   { "add": [ ... ], "remove": [ { "rule": "Bash(git push:*)", "why": "I push my own branches" } ] },
+    "deny":  { "add": [ ... ] } }
+
+`set` merges into the base, objects key by key, anything else replaced; `unset` drops keys (a dotted
+path, or a list of keys when a key holds a dot), before `set` applies. Refused: removing a deny rule,
+removing an ask rule that guards secrets (one naming `secrets` or `sops`), and a removal without a
+`why`. The build keeps the base's order and appends what the overlay adds.
+
+Every write also saves a copy of the build beside the output (settings.built.json), so a later run can
+tell an edit made in ~/.claude/settings.json — by Claude Code ("don't ask again", /config, /model) or by
+hand — from a build that is merely out of date (the base or the overlay changed since).
+
+Usage:
+  settings-build                     build and write ~/.claude/settings.json. Refused when that file has
+                                     edits of its own since the last build: --check shows them, --adopt
+                                     keeps them, --force discards them
+  settings-build --check             exit 0 when ~/.claude/settings.json is the build; else list the
+                                     differences, split into edits made there and changes waiting for a
+                                     build. map-check runs this
+  settings-build --adopt [--from F]  move the edits made in ~/.claude/settings.json (or, with --from, every
+                                     difference between F and the build) into the overlay, then build.
+                                     A removal gets a placeholder `why` to replace. Review the overlay's
+                                     diff before committing it: a rule for one project's own commands
+                                     belongs in that project's .claude/settings.json, not here
+  settings-build --print             print the build; write nothing
+  --replace-link                     replace a ~/.claude/settings.json that is still a link (the layout
+                                     before this script) with the built file
+  --base F / --overlay F / --out F   other paths (tests)
+
+Exit codes: 0 ok, or in step · 1 differences (--check), or refused: edits in the output, a link in
+its place, an overlay rule that may not be removed · 2 usage, or an overlay that isn't valid ·
+5 no base file
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import datetime as dt
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+EX_OK, EX_FAIL, EX_USAGE, EX_CONFIG = 0, 1, 2, 5
+ROOT = Path(os.environ.get("CC_ROOT") or Path(__file__).resolve().parent.parent)
+LISTS = ("allow", "ask", "deny")
+PROTECTED = re.compile(r"\b(secrets|sops)\b")
+PLACEHOLDER = "adopted {date}: say why"
+HOME = str(Path.home())
+
+
+class Refused(Exception):
+    def __init__(self, code: int, msg: str):
+        super().__init__(msg)
+        self.code = code
+
+
+def tilde(p: Path) -> str:
+    s = str(p)
+    return "~" + s[len(HOME):] if s.startswith(HOME + "/") else s
+
+
+# ---------------------------------------------------------------- files
+
+
+def load(path: Path, what: str) -> dict:
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise Refused(EX_USAGE, f"{what} {tilde(path)} is not valid JSON: {e}") from e
+    if not isinstance(data, dict):
+        raise Refused(EX_USAGE, f"{what} {tilde(path)} is not a JSON object")
+    return data
+
+
+def dump(data: dict) -> str:
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
+def built_copy(out: Path) -> Path:
+    return out.with_name("settings.built.json")
+
+
+# ---------------------------------------------------------------- paths
+
+
+def split_path(p) -> list[str]:
+    if isinstance(p, list) and p and all(isinstance(k, str) for k in p):
+        return p
+    if isinstance(p, str) and p:
+        return p.split(".")
+    raise Refused(EX_USAGE, f"overlay: unset entry {json.dumps(p)} is not a dotted path or a list of keys")
+
+
+def join_path(keys: list[str]) -> str | list[str]:
+    return keys if any("." in k for k in keys) else ".".join(keys)
+
+
+def show_path(keys: list[str]) -> str:
+    return ".".join(keys)
+
+
+def flatten(data: dict, prefix: tuple[str, ...] = ()) -> dict[tuple[str, ...], object]:
+    """Leaves of the settings, keyed by path. permissions.allow/ask/deny are left out: they are sets."""
+    out: dict[tuple[str, ...], object] = {}
+    for k, v in data.items():
+        path = prefix + (k,)
+        if path[:1] == ("permissions",) and len(path) == 2 and k in LISTS:
+            continue
+        if isinstance(v, dict) and v:
+            out.update(flatten(v, path))
+        else:
+            out[path] = v
+    return out
+
+
+def rules(data: dict, kind: str) -> list[str]:
+    return list((data.get("permissions") or {}).get(kind) or [])
+
+
+def get_in(data: dict, keys) -> tuple[bool, object]:
+    cur: object = data
+    for k in keys:
+        if not isinstance(cur, dict) or k not in cur:
+            return False, None
+        cur = cur[k]
+    return True, cur
+
+
+def set_in(data: dict, keys, value) -> None:
+    cur = data
+    for k in keys[:-1]:
+        if not isinstance(cur.get(k), dict):
+            cur[k] = {}
+        cur = cur[k]
+    cur[keys[-1]] = value
+
+
+def del_in(data: dict, keys) -> None:
+    cur = data
+    trail = []
+    for k in keys[:-1]:
+        if not isinstance(cur, dict) or k not in cur:
+            return
+        trail.append((cur, k))
+        cur = cur[k]
+    if isinstance(cur, dict):
+        cur.pop(keys[-1], None)
+    for parent, k in reversed(trail):  # drop objects the deletion left empty
+        if parent[k] == {}:
+            del parent[k]
+
+
+def merge(into: dict, src: dict) -> None:
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(into.get(k), dict):
+            merge(into[k], v)
+        else:
+            into[k] = copy.deepcopy(v)
+
+
+# ---------------------------------------------------------------- the overlay
+
+
+def check_overlay(ov: dict) -> list[str]:
+    """Raise on an overlay that isn't valid or removes what it may not; return notes."""
+    unknown = set(ov) - {"set", "unset", *LISTS, "$comment"}
+    if unknown:
+        raise Refused(EX_USAGE, f"overlay: unknown keys {sorted(unknown)} (set, unset, allow, ask, deny)")
+    if not isinstance(ov.get("set", {}), dict):
+        raise Refused(EX_USAGE, "overlay: `set` must be an object")
+    perms = ov.get("set", {}).get("permissions", {})
+    if isinstance(perms, dict) and set(perms) & set(LISTS):
+        raise Refused(EX_USAGE, "overlay: rules go in allow/ask/deny add and remove, not in set.permissions")
+    if not isinstance(ov.get("unset", []), list):
+        raise Refused(EX_USAGE, "overlay: `unset` must be a list")
+    for p in ov.get("unset", []):
+        split_path(p)
+    for kind in LISTS:
+        sec = ov.get(kind, {})
+        if not isinstance(sec, dict) or set(sec) - {"add", "remove"}:
+            raise Refused(EX_USAGE, f"overlay: `{kind}` takes only add and remove")
+        add = sec.get("add", [])
+        if not isinstance(add, list) or not all(isinstance(r, str) and r for r in add):
+            raise Refused(EX_USAGE, f"overlay: {kind}.add must be a list of rules")
+        for item in sec.get("remove", []):
+            if not (isinstance(item, dict) and isinstance(item.get("rule"), str) and item["rule"]):
+                raise Refused(EX_USAGE, f"overlay: each {kind}.remove entry is {{\"rule\": …, \"why\": …}}")
+            if not str(item.get("why", "")).strip():
+                raise Refused(EX_USAGE, f"overlay: {kind}.remove {item['rule']} has no `why`")
+            if kind == "deny":
+                raise Refused(EX_FAIL, f"overlay: deny rules can't be removed ({item['rule']})")
+            if kind == "ask" and PROTECTED.search(item["rule"]):
+                raise Refused(EX_FAIL, f"overlay: {item['rule']} guards secrets and can't be removed from ask")
+    return []
+
+
+def build(base: dict, ov: dict) -> tuple[dict, list[str]]:
+    notes = check_overlay(ov)
+    out = copy.deepcopy(base)
+    for p in ov.get("unset", []):
+        keys = split_path(p)
+        if not get_in(out, keys)[0]:
+            notes.append(f"unset {show_path(keys)}: not in the base")
+        del_in(out, keys)
+    merge(out, ov.get("set", {}))
+    perms = out.setdefault("permissions", {})
+    for kind in LISTS:
+        sec = ov.get(kind, {})
+        have = rules(base, kind)
+        gone = {item["rule"] for item in sec.get("remove", [])}
+        for r in sorted(gone - set(have)):
+            notes.append(f"{kind}.remove {r}: not in the base (the template dropped it; remove the entry)")
+        result = [r for r in have if r not in gone]
+        for r in sec.get("add", []):
+            if r in result:
+                notes.append(f"{kind}.add {r}: already in the base")
+            else:
+                result.append(r)
+        if result or kind in perms:
+            perms[kind] = result
+    for r in rules(out, "allow"):
+        if r in rules(out, "ask"):
+            notes.append(f"allow {r} has no effect: ask still has it (an ask rule wins over an allow)")
+    return out, notes
+
+
+# ---------------------------------------------------------------- differences
+
+
+def differences(old: dict, new: dict) -> list[tuple[str, str, object]]:
+    """What changed from old to new: (op, where, value), op one of + - ~."""
+    out: list[tuple[str, str, object]] = []
+    for kind in LISTS:
+        a, b = rules(old, kind), rules(new, kind)
+        out += [("+", f"{kind} {r}", None) for r in b if r not in a]
+        out += [("-", f"{kind} {r}", None) for r in a if r not in b]
+    fa, fb = flatten(old), flatten(new)
+    for path in fb:
+        if path not in fa:
+            out.append(("+", show_path(list(path)), fb[path]))
+        elif fa[path] != fb[path]:
+            out.append(("~", show_path(list(path)), fb[path]))
+    out += [("-", show_path(list(p)), None) for p in fa if p not in fb]
+    return out
+
+
+def render(diff: list[tuple[str, str, object]]) -> list[str]:
+    lines = []
+    for op, where, value in diff:
+        v = "" if value is None and op != "~" else " = " + json.dumps(value, ensure_ascii=False)
+        if len(v) > 100:
+            v = v[:97] + "…"
+        lines.append(f"    {op} {where}{v}")
+    return lines
+
+
+def same(a: dict, b: dict) -> bool:
+    return not differences(a, b)
+
+
+def adopt(base: dict, ov: dict, ref: dict, target: dict) -> tuple[dict, list[str]]:
+    """Fold the edits from ref to target into the overlay. Returns the new overlay and what was refused."""
+    ov = copy.deepcopy(ov)
+    refused: list[str] = []
+    today = dt.date.today().isoformat()
+    for kind in LISTS:
+        a, b = rules(ref, kind), rules(target, kind)
+        sec = ov.setdefault(kind, {})
+        add, remove = sec.setdefault("add", []), sec.setdefault("remove", [])
+        for r in b:
+            if r in a:
+                continue
+            if any(item["rule"] == r for item in remove):
+                sec["remove"] = remove = [item for item in remove if item["rule"] != r]
+            elif r not in rules(base, kind) and r not in add:
+                add.append(r)
+        for r in a:
+            if r in b:
+                continue
+            if r in add:
+                add.remove(r)
+            elif kind == "deny":
+                refused.append(f"deny {r}: deny rules can't be removed; kept")
+            elif kind == "ask" and PROTECTED.search(r):
+                refused.append(f"ask {r}: guards secrets and can't be removed; kept")
+            elif r in rules(base, kind) and not any(item["rule"] == r for item in remove):
+                remove.append({"rule": r, "why": PLACEHOLDER.format(date=today)})
+        for key in ("add", "remove"):
+            if not sec[key]:
+                del sec[key]
+        if not sec:
+            del ov[kind]
+    fa, fb = flatten(ref), flatten(target)
+    sets = ov.setdefault("set", {})
+    unset = ov.setdefault("unset", [])
+    for path, value in fb.items():
+        if fa.get(path, object()) == value and path in fa:
+            continue
+        keys = list(path)
+        unset[:] = [p for p in unset if split_path(p) != keys]
+        if get_in(base, keys) == (True, value):
+            del_in(sets, keys)
+        else:
+            set_in(sets, keys, copy.deepcopy(value))
+    for path in fa:
+        if path in fb:
+            continue
+        # the shortest prefix the target lacks: a whole object removed is one unset, not one per leaf
+        keys = next(list(path[:i]) for i in range(1, len(path) + 1) if not get_in(target, path[:i])[0]) \
+            if not get_in(target, path)[0] else list(path)
+        del_in(sets, keys)
+        if get_in(base, keys)[0] and all(split_path(p) != keys for p in unset):
+            unset.append(join_path(keys))
+    for key in ("set", "unset"):
+        if not ov[key]:
+            del ov[key]
+    ordered = {k: ov[k] for k in ("$comment", "set", "unset", *LISTS) if k in ov}
+    return ordered, refused
+
+
+# ---------------------------------------------------------------- main
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("-h", "--help", action="store_true")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--adopt", action="store_true")
+    mode.add_argument("--print", action="store_true")
+    ap.add_argument("--from", dest="src")
+    ap.add_argument("--force", action="store_true")
+    ap.add_argument("--replace-link", action="store_true")
+    ap.add_argument("--base", default=str(ROOT / "claude-global" / "settings.json"))
+    ap.add_argument("--overlay", default=str(ROOT / "claude-global" / "settings.overlay.json"))
+    ap.add_argument("--out", default=str(Path.home() / ".claude" / "settings.json"))
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        return EX_USAGE
+    if args.help:
+        print(__doc__.strip())
+        return EX_OK
+    if args.src and not args.adopt:
+        raise Refused(EX_USAGE, "--from goes with --adopt")
+
+    base_p, ov_p, out_p = Path(args.base), Path(args.overlay), Path(args.out)
+    if not base_p.is_file():
+        raise Refused(EX_CONFIG, f"no base at {tilde(base_p)}")
+    base = load(base_p, "base")
+    ov = load(ov_p, "overlay") if ov_p.exists() else {}
+    built, notes = build(base, ov)
+
+    if args.print:
+        sys.stdout.write(dump(built))
+        for n in notes:
+            print(f"settings-build: note: {n}", file=sys.stderr)
+        return EX_OK
+
+    is_link = out_p.is_symlink()
+    cur = load(out_p, "settings") if out_p.exists() else None
+    last_p = built_copy(out_p)
+    last = load(last_p, "last build") if last_p.is_file() and not is_link else None
+
+    if args.adopt:
+        if args.src:
+            target, ref = load(Path(args.src), "--from"), built
+        elif cur is None:
+            raise Refused(EX_FAIL, f"nothing to adopt: no {tilde(out_p)}")
+        else:
+            target, ref = cur, (last if last is not None else built)
+        new_ov, refused = adopt(base, ov, ref, target)
+        for r in refused:
+            print(f"settings-build: refused: {r}", file=sys.stderr)
+        if new_ov == ov:
+            print("settings-build: nothing to adopt")
+        else:
+            ov_p.write_text(dump(new_ov))
+            print(f"settings-build: adopted into {tilde(ov_p)}:")
+            print("\n".join(render(differences(built, build(base, new_ov)[0]))))
+            if any(i["why"].endswith(PLACEHOLDER.split(":")[1]) for k in LISTS for i in new_ov.get(k, {}).get("remove", [])):
+                print("  every removal needs a reason: replace each placeholder `why`")
+            print("  a rule for one project's own commands belongs in that project's .claude/settings.json")
+        if args.src:
+            return EX_OK
+        built, notes = build(base, new_ov)
+        cur = last = built  # the output's edits now live in the overlay
+
+    for n in notes:
+        print(f"settings-build: note: {n}", file=sys.stderr)
+
+    if args.check:
+        if is_link:
+            print(f"settings-build: {tilde(out_p)} is a link to {os.readlink(out_p)}, not a built file "
+                  "(--replace-link, after --adopt --from it if it holds edits of its own)")
+            return EX_FAIL
+        if cur is None:
+            print(f"settings-build: no {tilde(out_p)}: run settings-build")
+            return EX_FAIL
+        if same(cur, built):
+            return EX_OK
+        print(f"settings-build: {tilde(out_p)} is not the build")
+        ref = last if last is not None else built
+        edits, pending = differences(ref, cur), differences(ref, built)
+        if edits:
+            print(f"  edited in {tilde(out_p)} (keep: --adopt · discard: --force):")
+            print("\n".join(render(edits)))
+        if pending and last is not None:
+            print("  waiting for a build (base or overlay changed; run settings-build):")
+            print("\n".join(render(pending)))
+        return EX_FAIL
+
+    # write
+    if is_link and not args.replace_link:
+        raise Refused(EX_FAIL, f"{tilde(out_p)} is a link to {os.readlink(out_p)}: --replace-link replaces it "
+                      "with the built file (if it holds edits the base lacks, --adopt --from it first)")
+    if cur is not None and not is_link and not args.force and not args.adopt:
+        ref = last if last is not None else built
+        edits = differences(ref, cur)
+        if edits:
+            raise Refused(EX_FAIL, f"{tilde(out_p)} has edits of its own since the last build "
+                          "(settings-build --check shows them; --adopt keeps them, --force discards them):\n"
+                          + "\n".join(render(edits)))
+    text = dump(built)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    if is_link:
+        out_p.unlink()
+    changed = not (out_p.is_file() and out_p.read_text() == text)
+    if changed:
+        tmp = out_p.with_name(out_p.name + ".tmp")
+        tmp.write_text(text)
+        tmp.replace(out_p)
+    built_copy(out_p).write_text(text)
+    if changed:
+        print(f"settings-build: wrote {tilde(out_p)}")
+    return EX_OK
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Refused as e:
+        print(f"settings-build: {e}", file=sys.stderr)
+        sys.exit(e.code)
+    except KeyboardInterrupt:
+        sys.exit(130)
