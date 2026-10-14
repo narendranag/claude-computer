@@ -15,7 +15,9 @@
 # including) the old one · (5) a file deleted here: skipped and named if the template changed it,
 # silent if the template deleted it too · (6) a conflict: exit 1, the file named, markers in it ·
 # (7) --dry-run reports the same and leaves the tree, the index and the worktree list as they were ·
-# (8) already on that release → 0
+# (8) already on that release → 0 · (9) an instance that took part of a release by hand: a rename onto
+# a file it already has, a deletion of a file it changed, and a file it already has the same — each
+# decided on its own, the rest of the release still applied, the dry run saying the same
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -204,6 +206,50 @@ banner "(8) already there"
 run "$I" v0.3.0
 check_exit 0 "$RC"
 contains "$WORK/err" "already on v0.3.0"
+
+# --------------------------------------------------------------------------
+banner "(9) part of a release already taken by hand"
+T2="$WORK/template2"
+git init -q "$T2"
+printf 'p\n' > "$T2/plain.txt"
+printf 'x\n' > "$T2/oldname.txt"
+printf 'r\n' > "$T2/removed.txt"
+touch "$T2/.template"
+printf '# Changelog\n\n## [1.0.0] — 2026-01-01\n\n- first\n' > "$T2/CHANGELOG.md"
+printf 'v1.0.0\n' > "$T2/.template-version"
+git -C "$T2" add -A && git -C "$T2" commit -qm v1.0.0 && git -C "$T2" tag v1.0.0
+git -C "$T2" mv oldname.txt newname.txt
+git -C "$T2" rm -q removed.txt
+printf 'p2\n' > "$T2/plain.txt"
+printf 'same\n' > "$T2/added-same.txt"
+printf '# Changelog\n\n## [1.1.0] — 2026-01-02\n\n- second\n\n## [1.0.0] — 2026-01-01\n\n- first\n' > "$T2/CHANGELOG.md"
+printf 'v1.1.0\n' > "$T2/.template-version"
+git -C "$T2" add -A && git -C "$T2" commit -qm v1.1.0 && git -C "$T2" tag v1.1.0
+I3="$WORK/inst-partial"
+git init -q "$I3"
+git -C "$T2" archive v1.0.0 | tar -x -C "$I3"
+rm -f "$I3/.template"
+printf 'mine\n' > "$I3/newname.txt"
+printf 'r, changed here\n' > "$I3/removed.txt"
+printf 'same\n' > "$I3/added-same.txt"
+git -C "$I3" add -A && git -C "$I3" commit -qm "instance, part of 1.1.0 by hand"
+git -C "$I3" remote add upstream "$T2"
+run "$I3" v1.1.0 --dry-run
+check_exit 1 "$RC"
+contains "$WORK/err" "already here with other contents"
+contains "$WORK/err" "  newname.txt"
+contains "$WORK/err" "Deleted in the template, but changed here"
+contains "$WORK/err" "  removed.txt"
+if [ -z "$(git -C "$I3" status --porcelain)" ]; then ok "dry run left the tree alone"; else bad "dry run changed the tree"; fi
+run "$I3" v1.1.0
+check_exit 1 "$RC"
+if [ "$(cat "$I3/plain.txt")" = p2 ]; then ok "the rest of the release applied"; else bad "plain.txt not updated"; fi
+if [ ! -e "$I3/oldname.txt" ]; then ok "the rename's old name removed"; else bad "oldname.txt still there"; fi
+if [ "$(cat "$I3/newname.txt")" = mine ]; then ok "a file already here kept as yours"; else bad "newname.txt overwritten"; fi
+if [ "$(cat "$I3/removed.txt")" = "r, changed here" ]; then ok "a changed file the template deleted kept"; else bad "removed.txt lost"; fi
+absent "$WORK/err" "added-same.txt"
+if [ "$(cat "$I3/.template-version")" = v1.1.0 ]; then ok ".template-version is v1.1.0"; else bad ".template-version not updated"; fi
+if git -C "$I3" diff --cached --name-only | grep -qx plain.txt; then ok "staged, not committed"; else bad "plain.txt not staged"; fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]
