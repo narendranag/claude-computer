@@ -32,29 +32,30 @@ You are the operator for this user's machines. This repo is the shared brain for
 
 ## Where things are
 
-| Path                                          | What                                                                                |
-| --------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `bin/`                                        | every script; run any with `--help`                                                 |
-| `lib/common.sh`                               | the `cc_*` helpers and `EX_*` exit codes every bash script sources                  |
-| `lib/cc.py`, `lib/google_auth.py`             | the same for the `uv run --script` scripts; Google OAuth                            |
-| `claude-global/`                              | symlinked to `~/.claude` — global CLAUDE.md, settings, hooks, slash commands        |
-| `Brewfile`, `Brewfile.dev`, `Brewfile.server` | packages, layered by role                                                           |
-| `install.sh`                                  | the one-liner that puts the operator on a new Mac; `docs/INSTALL.md` explains it    |
-| `tests/`                                      | what CI runs beyond shellcheck — `install-dry-run.sh` drives `install.sh --dry-run` |
-| `setup-tools.sh`                              | what Homebrew can't install — runtimes, Playwright, Agent Reach, VS Code extensions |
-| `vscode-extensions.txt`                       | the extension list `setup-tools.sh vscode` installs, and `map-check` diffs          |
-| `dotfiles/`                                   | shell, prompt, terminal, git — linked by `/setup`                                   |
-| `macos-defaults.sh`                           | `defaults write` for a new Mac                                                      |
-| `templates/`                                  | scaffolds for new apps and for the other brains (vault, archive, camera, resources) |
-| `.githooks/`                                  | the gitleaks pre-commit scan; enabled with `git config core.hooksPath .githooks`    |
-| `docs/FIRST-PROMPT.md`                        | the prompt a new user pastes                                                        |
-| `docs/DEV-GUIDELINES.md`                      | how every project is built                                                          |
-| `docs/SECRETS.md`                             | every secret the scripts expect, how to get each value, and the age keys            |
-| `secrets/`                                    | the sops-encrypted store (`secrets.yaml`), its example, and the backup key's `.pub` |
-| `docs/FLEET.md`                               | index of machines                                                                   |
-| `docs/DECISIONS.md`                           | append-only decision log                                                            |
-| `docs/TEMPLATE-DECISIONS.md`                  | why the template is built this way; supersede it in `docs/DECISIONS.md`             |
-| `docs/machines/`                              | one file per machine                                                                |
-| `CHANGELOG.md`                                | what changed between template versions                                              |
-| `UPSTREAM`                                    | the template's URL, used by `/setup` and `/upstream` to set the fetch-only remote   |
-| `.template-version`                           | the template release this instance is on; `bin/template-pull` reads and updates it  |
+| Path                                          | What                                                                                                      |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `bin/`                                        | every script; run any with `--help`                                                                       |
+| `lib/common.sh`                               | the `cc_*` helpers and `EX_*` exit codes every bash script sources                                        |
+| `lib/cc.py`, `lib/google_auth.py`             | the same for the `uv run --script` scripts; Google OAuth                                                  |
+| `claude-global/`                              | linked into `~/.claude` — global CLAUDE.md, hooks, slash commands; `settings.json` is the template's base |
+| `claude-global/settings.overlay.json`         | your own rules and preferences; `bin/settings-build` makes `~/.claude/settings.json` from base + overlay  |
+| `Brewfile`, `Brewfile.dev`, `Brewfile.server` | packages, layered by role                                                                                 |
+| `install.sh`                                  | the one-liner that puts the operator on a new Mac; `docs/INSTALL.md` explains it                          |
+| `tests/`                                      | what CI runs beyond shellcheck — `install-dry-run.sh` drives `install.sh --dry-run`                       |
+| `setup-tools.sh`                              | what Homebrew can't install — runtimes, Playwright, Agent Reach, VS Code extensions                       |
+| `vscode-extensions.txt`                       | the extension list `setup-tools.sh vscode` installs, and `map-check` diffs                                |
+| `dotfiles/`                                   | shell, prompt, terminal, git — linked by `/setup`                                                         |
+| `macos-defaults.sh`                           | `defaults write` for a new Mac                                                                            |
+| `templates/`                                  | scaffolds for new apps and for the other brains (vault, archive, camera, resources)                       |
+| `.githooks/`                                  | the gitleaks pre-commit scan; enabled with `git config core.hooksPath .githooks`                          |
+| `docs/FIRST-PROMPT.md`                        | the prompt a new user pastes                                                                              |
+| `docs/DEV-GUIDELINES.md`                      | how every project is built                                                                                |
+| `docs/SECRETS.md`                             | every secret the scripts expect, how to get each value, and the age keys                                  |
+| `secrets/`                                    | the sops-encrypted store (`secrets.yaml`), its example, and the backup key's `.pub`                       |
+| `docs/FLEET.md`                               | index of machines                                                                                         |
+| `docs/DECISIONS.md`                           | append-only decision log                                                                                  |
+| `docs/TEMPLATE-DECISIONS.md`                  | why the template is built this way; supersede it in `docs/DECISIONS.md`                                   |
+| `docs/machines/`                              | one file per machine                                                                                      |
+| `CHANGELOG.md`                                | what changed between template versions                                                                    |
+| `UPSTREAM`                                    | the template's URL, used by `/setup` and `/upstream` to set the fetch-only remote                         |
+| `.template-version`                           | the template release this instance is on; `bin/template-pull` reads and updates it                        |
