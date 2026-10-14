@@ -9,8 +9,8 @@
 # step, an edit made in the output, a pending build, each said apart · (5) a build refuses to overwrite
 # edits; --force discards them · (6) --adopt folds the output's edits into the overlay, without undoing a
 # pending base change · (7) --adopt --from turns a whole file into an overlay that rebuilds it · (8) a
-# link in the output's place is refused until --replace-link · (9) the shipped base and example overlay
-# build cleanly
+# link in the output's place is refused until --replace-link · (9) the shipped base builds with the example
+# overlay, and with this repo's own overlay when it has one (an instance)
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -173,7 +173,11 @@ banner "(9) the shipped base and example overlay"
 "$SCRIPT" --print --base "$ROOT/claude-global/settings.json" --overlay "$ROOT/claude-global/settings.overlay.example.json" > "$WORK/shipped.json" 2> "$LOG"
 check_exit 0 $?
 is '.permissions.ask | index("Bash(brew uninstall:*)")' "$WORK/shipped.json" 'null'
-if [ -e "$ROOT/claude-global/settings.overlay.json" ]; then bad "the template ships settings.overlay.json"; else ok "no settings.overlay.json in the template"; fi
+# An instance's own overlay (the template ships none; CI refuses one there) must build on the base.
+if [ -e "$ROOT/claude-global/settings.overlay.json" ]; then
+  "$SCRIPT" --print --base "$ROOT/claude-global/settings.json" --overlay "$ROOT/claude-global/settings.overlay.json" > /dev/null 2> "$LOG"
+  check_exit 0 $?
+fi
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
