@@ -9,6 +9,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 ### Added
 
 - **`vault-lint` warns about a property a note's type doesn't define**, naming the nearest one it does: a commitment's `dropped_on` gets "did you mean `done_on`?". A warning, not an error: it prints and appears under `warnings` in `--json`, and never changes the exit code, so the night shift's gate is unaffected. Notes with `generated:` and transcripts are exempt; keys you add on purpose go in the vault's `.vault-lint.yaml` (`extra_properties: {commitment: [priority], "*": [mood]}`). The person schema now lists `github` and `git_authors`, which `project-import` already read from the owner's note.
+- `commitments brief [--days N] [--json]`: open commitments overdue and due in the next N days (default 7), and the people met yesterday from `memory/meetings/` attendees, the owner left out. `commitments list` gains `--overdue`, `--due-within N` and `--date`.
+
+### Changed
+
+- `/today` and the `daily-note` job add **Commitments** and **Met yesterday** to the daily note from `commitments brief`, as the vault's `CLAUDE.md` promised; `_templates/daily.md` has the two headings. The job's `--allowedTools` admits `commitments brief` (read-only); reinstall it with `schedule install daily-note`.
+- `/review` flags commitments past due (and due within a week, or open with no due date for 30 days) and proposes done, dropped or a new date for each, closing through `commitments set --via review`.
 
 ### Fixed
 

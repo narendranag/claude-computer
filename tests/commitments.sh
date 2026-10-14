@@ -7,7 +7,10 @@
 # "yours" · (2) without `me: true`, the note named after `git config user.name` · (3) with neither,
 # no commitment is "yours" and nothing fails · (4) `set done` writes status and done_on, a dated log
 # bullet in the owner's name citing the day's confirmation note, and commits the vault · (5) a second
-# `set` the same day appends to that confirmation note · (6) usage errors exit 2 and change nothing
+# `set` the same day appends to that confirmation note · (6) usage errors exit 2 and change nothing ·
+# (7) `list --overdue` and `--due-within N`, counted from `--date` · (8) `brief`: overdue, due in the next
+# 7 days, and the people met the day before (flow and block attendee lists, the owner left out, other days
+# ignored) · (9) a bad --date exits 2
 #
 # Exit codes: 0 every case passed · 1 a case failed
 #
@@ -118,6 +121,42 @@ check_exit 2 "$RC"
 run set no-such-id "done"
 check_exit 2 "$RC"
 if [ "$(git -C "$V" rev-parse HEAD)" = "$head_before" ]; then ok "nothing committed"; else bad "HEAD moved"; fi
+
+# --------------------------------------------------------------------------
+ids() { python3 -c 'import json,sys; print(" ".join(c["id"] for c in json.load(open(sys.argv[1]))))' "$WORK/out"; }
+banner "(7) list --overdue, --due-within"
+fresh; person jordan "Jordan Lee" me; own jordan
+run list --json --overdue --date 2026-10-14
+if [ "$(ids)" = "send-proposal" ]; then ok "overdue on 10-14"; else bad "overdue: $(ids)"; fi
+run list --json --due-within 7 --date 2026-10-14
+if [ "$(ids)" = "share-deck send-proposal" ]; then ok "due within 7 days, overdue included"; else bad "within: $(ids)"; fi
+run list --json --due-within 7 --date 2026-10-10
+if [ "$(ids)" = "send-proposal" ]; then ok "10-20 is not within 7 days of 10-10"; else bad "within: $(ids)"; fi
+
+# --------------------------------------------------------------------------
+banner "(8) brief"
+person casey-ng "Casey Ng"
+printf -- '---\ntype: meeting\ncreated: 2026-10-13\ndate: 2026-10-13\nattendees: ["[[memory/people/jordan]]", "[[memory/people/sam-rivera]]"]\n---\n# Pricing call — 2026-10-13\n' > "$V/memory/meetings/2026/2026-10-13-pricing.md"
+printf -- '---\ntype: meeting\ncreated: 2026-10-13\ndate: 2026-10-13\nattendees:\n  - "[[memory/people/sam-rivera]]"\n  - "[[memory/people/casey-ng|Casey]]"\ntranscript: "[[sources/transcripts/x]]"\n---\n# Design review — 2026-10-13\n' > "$V/memory/meetings/2026/2026-10-13-design.md"
+printf -- '---\ntype: meeting\ncreated: 2026-10-12\ndate: 2026-10-12\nattendees: ["[[memory/people/casey-ng]]"]\n---\n# Earlier — 2026-10-12\n' > "$V/memory/meetings/2026/2026-10-12-earlier.md"
+run brief --json --date 2026-10-14
+check_exit 0 "$RC"
+got="$(python3 -c '
+import json,sys; d=json.load(open(sys.argv[1]))
+print(d["met"]["date"], [c["id"] for c in d["overdue"]], [c["id"] for c in d["due_soon"]],
+      [(p["name"], [m["title"] for m in p["meetings"]]) for p in d["met"]["people"]])' "$WORK/out")"
+want="2026-10-13 ['send-proposal'] ['share-deck'] [('Sam Rivera', ['Design review', 'Pricing call']), ('Casey Ng', ['Design review'])]"
+if [ "$got" = "$want" ]; then ok "overdue, due soon, met yesterday"; else bad "brief: $got"; fi
+run brief --date 2026-10-12 --days 7
+contains "$WORK/out" "Due by 2026-10-19 (0)"
+run brief --date 2026-10-15 --days 7
+contains "$WORK/out" "Due by 2026-10-22 (1)"
+contains "$WORK/out" "Met on 2026-10-14 (0)"
+
+# --------------------------------------------------------------------------
+banner "(9) a bad --date"
+run brief --date 14-10-2026
+check_exit 2 "$RC"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]
