@@ -48,12 +48,13 @@ Link the **contents** of `claude-global/`, not the directory — `~/.claude` als
 
 ```
 ~/.claude/CLAUDE.md      → ~/claude-computer/claude-global/CLAUDE.md
-~/.claude/settings.json  → ~/claude-computer/claude-global/settings.json
 ~/.claude/commands       → ~/claude-computer/claude-global/commands
 ~/.claude/hooks          → ~/claude-computer/claude-global/hooks
 ```
 
-If any of these already exist, **don't just move them aside**: show me a diff of each against the repo version, propose a merge (my existing permissions, hooks and commands into `claude-global/` — this repo is private, so they belong there), apply what I approve, and only then back the originals up to `~/.claude/backup-<date>/` and link.
+If any of these already exist, **don't just move them aside**: show me a diff of each against the repo version, propose a merge (my existing hooks and commands into `claude-global/` — this repo is private, so they belong there), apply what I approve, and only then back the originals up to `~/.claude/backup-<date>/` and link.
+
+`~/.claude/settings.json` is **built, not linked**: `./bin/settings-build` writes it from `claude-global/settings.json` (the template's; never edit it here) and `claude-global/settings.overlay.json` (mine: what I add, change or take out, each removal with a reason). If I already have a `~/.claude/settings.json` with permissions or preferences of my own, copy it to `~/.claude/backup-<date>/` first, then `./bin/settings-build --adopt --from ~/.claude/backup-<date>/settings.json` folds the difference into the overlay; show me the overlay, have me give every removal a real `why`, and only then `./bin/settings-build --force` (or `--replace-link` if it was a link). Commit the overlay.
 
 Write the resume line in `TASKS.md` (see top), commit, and tell me to restart Claude Code in `~/claude-computer`. After the restart, confirm the status line shows auto mode. If auto mode isn't available on this account or model, the session starts in Manual; tell me, and carry on — the ask and deny rules work the same.
 

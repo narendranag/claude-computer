@@ -87,7 +87,7 @@ def segments(command: str) -> list[list[str]] | None:
 
 def main() -> None:
     if os.environ.get("CC_RM_GUARD") == "off":
-        return  # turned off on this machine (~/.claude/settings.local.json env)
+        return  # turned off: `env` in the settings overlay, or exported in this machine's shell
     try:
         data = json.load(sys.stdin)
         if data.get("tool_name") != "Bash":
