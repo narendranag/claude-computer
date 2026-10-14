@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Fixed
+
+- **`template-pull` no longer gives up on the whole release over one file.** `git apply` is all or nothing, so an instance that had taken part of a release by hand — a file the release adds already there, a file it deletes changed here — got nothing applied. Each file is now decided on its own: one you never touched takes the template's version, one you both changed merges three-way, and one that can't be merged is left as yours and listed with the command that takes the template's version. The rest of the release applies either way, and `--dry-run` reports the same lists.
+
 ## [0.7.0] — 2026-10-14
 
 ### Migrating from 0.6

@@ -3,9 +3,12 @@
 #
 # An instance made with "Use this template" shares no history with the template, so `git merge`
 # refuses. This applies the template's own diff from the release the instance is on to the one you
-# name (`git diff --binary <from> <to> | git apply --3way --index`): a change you also made merges
-# three-way, a change already here applies as a no-op, and where you and the template changed the
-# same lines the file is left with conflict markers. Nothing is committed.
+# name, one file at a time: a file you never touched takes the template's version, a change you also
+# made merges three-way (`git apply --3way --index`), a change already here is a no-op, and where you
+# and the template changed the same lines the file is left with conflict markers. A file that can't be
+# merged — the template adds one you already have with other contents, deletes one you changed, or
+# changes one you deleted — is left as it is and listed with the command that takes the template's
+# version; the rest of the release still applies. Nothing is committed.
 #
 # The release this instance is on is in .template-version, which the template ships and this script
 # updates. An instance made before that file existed passes --from once: the release it was made
@@ -20,9 +23,9 @@
 #   template-pull <tag> --dry-run         the same in a throwaway worktree: what would change, and
 #                                         which files would conflict; this one is left untouched
 #
-# Exit codes: 0 applied cleanly (or nothing to do) · 1 applied with conflicts (resolve them, then
-# commit), or git failed · 2 usage, or uncommitted changes · 5 no `upstream` remote, an unknown tag,
-# or no .template-version and no --from
+# Exit codes: 0 applied cleanly (or nothing to do) · 1 applied, with conflicts or files left for you
+# (resolve them, then commit), or git failed · 2 usage, or uncommitted changes · 5 no `upstream`
+# remote, an unknown tag, or no .template-version and no --from
 set -euo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 cc_wants_help "$@"
@@ -70,39 +73,61 @@ if ! g diff --quiet || ! g diff --cached --quiet; then
   cc_die "$EX_USAGE" "uncommitted changes: commit or stash them first"
 fi
 
-# git apply is all or nothing: one path it cannot find fails the whole patch. So paths this instance
-# no longer has are left out — deleted here and in the template: done already; changed in the
-# template but deleted here: skipped, and named, since keeping it deleted is the instance's call.
-# .template-version is written below, not patched: the instance's copy may not match the base.
-skipped="" excludes=":(exclude).template-version"
-while IFS="$(printf '\t')" read -r st path; do
-  case "$st" in A) continue ;; esac
-  g cat-file -e "HEAD:$path" 2> /dev/null && continue
-  excludes="$excludes"$'\n'":(exclude,literal)$path"
-  [ "$st" = D ] || skipped="$skipped$path"$'\n'
-done < <(g diff --no-renames --name-status "refs/template/$from" "refs/template/$to")
-patch() {
-  local -a ex=()
-  while IFS= read -r e; do ex+=("$e"); done <<< "$excludes"
-  g diff --no-renames --binary "refs/template/$from" "refs/template/$to" -- . "${ex[@]}"
-}
-report_skipped() {
-  [ -n "$skipped" ] || return 0
-  cc_info "Skipped — changed in the template, but deleted here (restore one with git checkout refs/template/$to -- <path>):"
-  printf '%s' "$skipped" | indent
-}
-
-# Apply in the work tree $1. 0 clean · 1 conflicts, listed on stdout · 2 git apply failed outright.
+# One file at a time, because git apply is all or nothing: a single path it can't place fails the whole
+# patch, and an instance that took part of a release by hand has many. Each path of the template's diff
+# (renames as a delete and an add) is decided on its own; .template-version is written below, not
+# patched. Apply in the work tree $1; print one line per path that needs the owner: "C path" a conflict,
+# "X path" already here with other contents, "K path" deleted in the template but changed here,
+# "F path" the patch would not apply, "S path" changed in the template but deleted here.
 apply_in() {
-  local dir="$1" err rc=0 conflicts
+  local dir="$1" st path here old new err
   err="$(mktemp "${TMPDIR:-/tmp}/template-pull-err.XXXXXX")"
-  patch | git -C "$dir" apply --3way --index > /dev/null 2> "$err" || rc=$?
-  conflicts="$(git -C "$dir" diff --name-only --diff-filter=U)"
-  if [ -n "$conflicts" ]; then rm -f "$err"; printf '%s\n' "$conflicts"; return 1; fi
-  if [ "$rc" -ne 0 ]; then cat "$err" >&2; rm -f "$err"; return 2; fi
+  while IFS="$(printf '\t')" read -r st path; do
+    [ "$path" = .template-version ] && continue
+    here="$(git -C "$dir" rev-parse -q --verify "HEAD:$path" 2> /dev/null || true)"
+    old="$(g rev-parse -q --verify "refs/template/$from:$path" 2> /dev/null || true)"
+    new="$(g rev-parse -q --verify "refs/template/$to:$path" 2> /dev/null || true)"
+    [ -n "$here" ] && [ "$here" = "$new" ] && continue # already the template's version
+    case "$st" in
+      A)
+        if [ -z "$here" ]; then git -C "$dir" checkout -q "refs/template/$to" -- "$path"
+        else echo "X $path"; fi ;;
+      D)
+        if [ -z "$here" ]; then continue # deleted here too
+        elif [ "$here" = "$old" ]; then git -C "$dir" rm -q -- "$path"
+        else echo "K $path"; fi ;;
+      *)
+        if [ -z "$here" ]; then echo "S $path"
+        elif [ "$here" = "$old" ]; then git -C "$dir" checkout -q "refs/template/$to" -- "$path"
+        elif g diff --binary "refs/template/$from" "refs/template/$to" -- ":(literal)$path" \
+          | git -C "$dir" apply --3way --index > /dev/null 2> "$err"; then :
+        elif [ -n "$(git -C "$dir" ls-files -u -- "$path")" ]; then echo "C $path"
+        else echo "F $path"; sed 's/^/      /' "$err" >&2; fi ;;
+    esac
+  done < <(g diff --no-renames --name-status "refs/template/$from" "refs/template/$to")
   rm -f "$err"
 }
 indent() { sed 's/^/  /' >&2; }
+
+# The report for apply_in's lines on stdin. Returns 1 when anything needs the owner.
+report() {
+  local out kind label rc=0
+  out="$(cat)"
+  for kind in C X K F S; do
+    case "$kind" in
+      C) label="Conflicts — resolve each, then git add it:"; [ "$dry" -eq 0 ] || label="would conflict:" ;;
+      X) label="Added in the template, but already here with other contents — left as yours (compare: git diff HEAD refs/template/$to -- <path>; take the template's: git checkout refs/template/$to -- <path>):" ;;
+      K) label="Deleted in the template, but changed here — kept (to delete it: git rm <path>):" ;;
+      F) label="Would not apply — left as yours (take the template's: git checkout refs/template/$to -- <path>):" ;;
+      S) label="Skipped — changed in the template, but deleted here (restore one with git checkout refs/template/$to -- <path>):" ;;
+    esac
+    printf '%s\n' "$out" | grep -q "^$kind " || continue
+    cc_info "$label"
+    printf '%s\n' "$out" | sed -n "s/^$kind //p" | indent
+    [ "$kind" = S ] || rc=1
+  done
+  return "$rc"
+}
 
 changelog() {
   # Every section of the new release's CHANGELOG above the one for the release we came from.
@@ -117,21 +142,16 @@ if [ "$dry" -eq 1 ]; then
   trap 'g worktree remove --force "$tmp/wt" > /dev/null 2>&1; rm -rf "$tmp"' EXIT
   g worktree add -q --detach "$tmp/wt" HEAD
   cc_info "template-pull: $from → $to, dry run (this working tree is untouched)"
-  rc=0; conflicts="$(apply_in "$tmp/wt")" || rc=$?
-  [ "$rc" -ne 2 ] || cc_die "$EX_FAIL" "git apply failed: nothing would apply"
+  lines="$(apply_in "$tmp/wt")"
   git -C "$tmp/wt" diff --cached --stat | tail -1
-  report_skipped
-  if [ "$rc" -eq 1 ]; then
-    cc_info "would conflict:"; printf '%s\n' "$conflicts" | indent
-    exit "$EX_FAIL"
-  fi
+  rc=0; printf '%s\n' "$lines" | report || rc=$?
+  if [ "$rc" -ne 0 ]; then exit "$EX_FAIL"; fi
   cc_info "would apply cleanly"
   exit "$EX_OK"
 fi
 
 cc_info "template-pull: $from → $to"
-rc=0; conflicts="$(apply_in "$repo")" || rc=$?
-[ "$rc" -ne 2 ] || cc_die "$EX_FAIL" "git apply failed; nothing was changed"
+lines="$(apply_in "$repo")"
 printf '%s\n' "$to" > "$repo/.template-version"
 g add .template-version
 
@@ -139,12 +159,7 @@ echo
 changelog
 echo
 g diff --cached --stat | tail -1
-report_skipped
-if [ "$rc" -eq 1 ]; then
-  cc_info ""
-  cc_info "Conflicts — resolve each, then git add it:"
-  printf '%s\n' "$conflicts" | indent
-fi
+rc=0; printf '%s\n' "$lines" | report || rc=$?
 cc_info ""
 cc_info "Next: review (git diff --cached), commit \"[$(cc_host)] template: $from → $to\", push, and do"
 cc_info "every \"Migrating from\" step above on each machine. To back out: git reset --hard HEAD."
