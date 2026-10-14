@@ -8,6 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- **`vault-lint` warns about a property a note's type doesn't define**, naming the nearest one it does: a commitment's `dropped_on` gets "did you mean `done_on`?". A warning, not an error: it prints and appears under `warnings` in `--json`, and never changes the exit code, so the night shift's gate is unaffected. Notes with `generated:` and transcripts are exempt; keys you add on purpose go in the vault's `.vault-lint.yaml` (`extra_properties: {commitment: [priority], "*": [mood]}`). The person schema now lists `github` and `git_authors`, which `project-import` already read from the owner's note.
 - `commitments brief [--days N] [--json]`: open commitments overdue and due in the next N days (default 7), and the people met yesterday from `memory/meetings/` attendees, the owner left out. `commitments list` gains `--overdue`, `--due-within N` and `--date`.
 
 ### Changed

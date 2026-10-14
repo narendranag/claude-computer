@@ -32,13 +32,13 @@ System context: `~/claude-computer/docs/`. Tasks are not kept here (Rule 2).
 
 ## Properties
 
-Every note has `type` and `created`. Lists of links are YAML lists of quoted wikilinks: `people: ["[[memory/people/sam-rivera]]"]`. Dates are `YYYY-MM-DD`. Unknown values are left out, never guessed.
+Every note has `type` and `created`; any note may also carry `updated`, `aliases`, `tags` and `cssclasses`. A property its type doesn't list is a `vault-lint` warning (a typo, usually); one you add on purpose goes in `.vault-lint.yaml` at the vault's root, `extra_properties: {<type>: [<key>], "*": [<key>]}`, so the warning stays for typos. Lists of links are YAML lists of quoted wikilinks: `people: ["[[memory/people/sam-rivera]]"]`. Dates are `YYYY-MM-DD`. Unknown values are left out, never guessed.
 
 | `type` | Folder | Required | Optional |
 | --- | --- | --- | --- |
 | `note` | `notes/` | `created` | `topics`, `people`, `projects`, `sources` |
 | `daily` | `daily/` | `created` | — |
-| `person` | `memory/people/` | `created`, `name` (the owner's own note is named after `git config user.name` as a slug, carries `me: true`, and needs no sources) | `aliases`, `orgs`, `role`, `relationship` (client · colleague · partner · advisee · advisor · investor · vendor · friend · family · other: what they are to the owner now), `ties`, `last_contact`, `sources` |
+| `person` | `memory/people/` | `created`, `name` (the owner's own note is named after `git config user.name` as a slug, carries `me: true`, and needs no sources) | `aliases`, `orgs`, `role`, `relationship` (client · colleague · partner · advisee · advisor · investor · vendor · friend · family · other: what they are to the owner now), `ties`, `last_contact`, `sources`; on the owner's own note, `github` and `git_authors` (lists of the accounts and names they commit under, which `project-import` counts as theirs) |
 | `org` | `memory/orgs/` | `created`, `name` | `aliases`, `kind` (client · company · investor · vendor · community · other), `website`, `people`, `projects`, `sources` |
 | `meeting` | `memory/meetings/YYYY/` | `created`, `date`, `attendees`, `transcript` | `calendar` (the matched event), `time`, `duration`, `orgs`, `projects`, `topics`, `decisions`, `commitments` |
 | `decision` | `memory/decisions/` | `created`, `date`, `status` (made · superseded · reversed), `sources` | `decided_by`, `made_in`, `projects`, `topics`, `supersedes`, `superseded_by` |

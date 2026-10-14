@@ -22,6 +22,10 @@ Checks every Markdown note under memory/ and sources/repos/, or only the PATHs g
   log-citation  Rule 3: in memory/, each bullet under `## Log` ends with its source, `([[…]])`, and it resolves
   ties          a person's `ties` is a list of {relationship, org, since, until, source}: relationship one of
                 the allowed values, org a link to an org note, since/until dates in order, source a link or a list of links
+  unknown-property  (a warning) a property the note's type doesn't define in the Properties table, with
+                the nearest one it does (`dropped_on` → `done_on`). Not checked: transcripts and notes with
+                `generated:`, whose scripts own their properties. Keys you add on purpose go in the vault's
+                `.vault-lint.yaml`: `extra_properties: {commitment: [priority], "*": [mood]}` ("*": every type)
   markers       Rule 1: each script's `<!-- <script>:start -->` / `<!-- <script>:end -->` pair is whole, in
                 order, and appears once (a broken pair makes the script append a second block)
 
@@ -36,14 +40,16 @@ Usage:
   PATH         check these instead of memory/ and sources/repos/ (relative to the current folder,
                else to the vault)
 
-Output: `path:line: rule: message`, one per finding, then a summary line.
-Exit codes: 0 clean · 1 errors found · 2 usage · 5 vault missing
+Output: `path:line: rule: message`, one per error, then `path:line: warning: rule: message` for each
+warning, then a summary line. --json adds "warnings" beside "errors". Warnings never change the exit code.
+Exit codes: 0 no errors · 1 errors found · 2 usage · 5 vault missing
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
 import json
 import os
 import re
@@ -80,6 +86,23 @@ REQUIRED = {
     "transcript": [],  # "as transcripts-sync writes it": that script writes `date`, not `created`
     "map": ["created"],
 }
+OPTIONAL = {
+    "note": ["topics", "people", "projects", "sources"],
+    "daily": [],
+    "person": ["aliases", "orgs", "role", "relationship", "ties", "last_contact", "sources", "me", "github", "git_authors"],
+    "org": ["aliases", "kind", "website", "people", "projects", "sources"],
+    "meeting": ["calendar", "time", "duration", "orgs", "projects", "topics", "decisions", "commitments"],
+    "decision": ["decided_by", "made_in", "projects", "topics", "supersedes", "superseded_by"],
+    "commitment": ["due", "done_on", "task", "projects"],
+    "topic": ["aliases", "broader", "related"],
+    "project": ["local", "cold", "started", "ended", "stack", "orgs", "people", "topics", "snapshot"],
+    "source": ["url", "author", "date", "as_of", "summary", "repo_topics", "topics", "projects", "status"],
+    "transcript": [],
+    "map": ["generated"],
+}
+# Every type may carry these: the schema's own, and Obsidian's.
+COMMON = {"type", "created", "updated", "aliases", "tags", "cssclasses"}
+WARNINGS = {"unknown-property"}  # rules that report without failing the lint
 RELATIONSHIPS = ("client", "colleague", "partner", "advisee", "advisor", "investor", "vendor", "friend", "family", "other")
 TIE_KEYS = ("relationship", "org", "since", "until", "source")
 ENUMS = {
@@ -137,6 +160,7 @@ class Vault:
 
     def __init__(self, root: Path):
         self.root = root
+        self.extra = extra_properties(root)
         self.paths: set[str] = set()  # vault-relative, lower-case, with extension
         self.names: set[str] = set()  # basename lower-case, with and without .md
         for d, dirs, files in os.walk(root):
@@ -162,6 +186,23 @@ class Vault:
 
 MARKER_RE = re.compile(r"<!-- ([\w-]+):(start|end)\b")
 ORPHAN_RE = re.compile(r"^\s*— generated\b.*-->\s*$")
+
+
+def extra_properties(root: Path) -> dict[str, set[str]]:
+    """The vault's own additions to the schema: .vault-lint.yaml, `extra_properties: {type: [key, ...]}`."""
+    f = root / ".vault-lint.yaml"
+    if not f.is_file():
+        return {}
+    try:
+        data = yaml.load(f.read_text(encoding="utf-8"), Loader=Loader) or {}
+    except yaml.YAMLError as e:
+        raise cc.CCError(cc.EX_USAGE, f"{f}: invalid YAML: {e}") from e
+    extra = data.get("extra_properties") if isinstance(data, dict) else None
+    if extra is None:
+        return {}
+    if not isinstance(extra, dict) or not all(isinstance(v, list) for v in extra.values()):
+        raise cc.CCError(cc.EX_USAGE, f"{f}: extra_properties is a mapping of type (or \"*\") to a list of keys")
+    return {str(k): {str(x) for x in v} for k, v in extra.items()}
 
 
 def rel(path: Path, root: Path) -> str | None:
@@ -304,6 +345,14 @@ def check_note(path: Path, shown: str, vrel: str | None, vault: Vault, out: list
     for k in REQUIRED[typ]:
         if empty(fm.get(k)):
             err(at(k) if k in fm else 1, "required", f"{typ} needs `{k}`")
+
+    if typ != "transcript" and "generated" not in fm:
+        known = COMMON | set(REQUIRED[typ]) | set(OPTIONAL[typ]) | vault.extra.get(typ, set()) | vault.extra.get("*", set())
+        for k in fm:
+            if str(k) not in known:
+                near = difflib.get_close_matches(str(k), sorted(known), n=1)
+                hint = f" (did you mean `{near[0]}`?)" if near else ""
+                err(at(k), "unknown-property", f"{typ} has `{k}`, which the schema doesn't define for it{hint}")
 
     for (t, k), allowed in ENUMS.items():
         if t == typ and k in fm and not empty(fm[k]) and fm[k] not in allowed:
@@ -461,16 +510,23 @@ def main() -> int:
                 findings.append(Finding(w, 1, "duplicate", f"{kind} identity {ident!r} is also {others}"))
 
     findings.sort(key=lambda x: (x.path, x.line, x.rule, x.message))
+    warnings = [x for x in findings if x.rule in WARNINGS]
+    findings = [x for x in findings if x.rule not in WARNINGS]
     by_rule = dict(sorted(Counter(x.rule for x in findings).items()))
     n_files = len({x.path for x in findings})
     if args.json:
-        json.dump({"checked": checked, "errors": [asdict(x) for x in findings], "by_rule": by_rule}, sys.stdout, indent=2)
+        out = {"checked": checked, "errors": [asdict(x) for x in findings], "by_rule": by_rule}
+        out["warnings"] = [asdict(x) for x in warnings]
+        json.dump(out, sys.stdout, indent=2)
         print()
     else:
         for x in findings:
             print(f"{x.path}:{x.line}: {x.rule}: {x.message}")
+        for x in warnings:
+            print(f"{x.path}:{x.line}: warning: {x.rule}: {x.message}")
         detail = f" ({', '.join(f'{k} {v}' for k, v in by_rule.items())})" if by_rule else ""
-        print(f"vault-lint: {checked} notes checked, {len(findings)} errors in {n_files} notes{detail}")
+        warned = f"; {len(warnings)} warning{'s' if len(warnings) > 1 else ''}" if warnings else ""
+        print(f"vault-lint: {checked} notes checked, {len(findings)} errors in {n_files} notes{detail}{warned}")
     return cc.EX_FAIL if findings else cc.EX_OK
 
 
