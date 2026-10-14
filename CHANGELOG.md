@@ -6,6 +6,10 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Fixed
+
+- **An instance's own settings overlay no longer fails its CI.** 0.7.0's `tests/settings-build.sh` and the CI settings check asserted that `claude-global/settings.overlay.json` doesn't exist, which is true of the template and false of every instance that commits its overlay as the migration says. Now an overlay that exists must build on the base, and only the template's own repository (the one `UPSTREAM` names) refuses to ship one.
+
 ## [0.7.0] — 2026-10-14
 
 ### Migrating from 0.6

@@ -171,8 +171,15 @@ jobs:
           set -euo pipefail
           jq -e . claude-global/settings.json > /dev/null
           jq -e . claude-global/settings.overlay.example.json > /dev/null
-          # The overlay is the owner's: the template ships only the example, so template-pull never touches theirs.
-          test ! -e claude-global/settings.overlay.json
+          # The overlay is the owner's: the template itself ships only the example, so template-pull never
+          # touches an instance's. An instance commits its own (UPSTREAM names the template, not itself).
+          if [ -e claude-global/settings.overlay.json ]; then
+            case "$(cat UPSTREAM)" in
+              *"github.com/$GITHUB_REPOSITORY.git" | *"github.com/$GITHUB_REPOSITORY")
+                echo "the template must not ship claude-global/settings.overlay.json" >&2; exit 1 ;;
+            esac
+            jq -e . claude-global/settings.overlay.json > /dev/null
+          fi
           # A typo in a permission rule fails open, so check the shape too.
           jq -e '.permissions.deny | type == "array" and length > 0' claude-global/settings.json > /dev/null
           jq -e '.permissions.defaultMode == "auto"' claude-global/settings.json > /dev/null
