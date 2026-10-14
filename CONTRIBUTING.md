@@ -20,7 +20,8 @@ bash -n <each of those>
 ./tests/install-dry-run.sh          # install.sh through thirty-seven simulated machines, on stubs
 ./tests/vault-setup.sh              # vault-setup through eight, on stubbed curl and gh
 ./tests/secrets.sh                  # bin/secrets on real sops and age, throwaway keys (brew install sops age)
-jq -e . claude-global/settings.json
+./tests/settings-build.sh           # bin/settings-build: base + overlay into ~/.claude/settings.json, in a temp HOME
+jq -e . claude-global/settings.json claude-global/settings.overlay.example.json
 ruff check lib docs/diagrams
 ```
 
