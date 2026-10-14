@@ -18,6 +18,18 @@ The vault's layout changes: `people/` and `projects/` at the root move into `mem
 6. **Projects you no longer have checked out** (optional): `project-import --catalogue --vault ~/vault` lists every repo of yours with a proposed tier; the night shift then writes hubs for the `hub` tier, a few a night.
 7. **The night shift** (optional): `schedule install vault-nightly` on the vault's home machine, and `schedule install daily-note` again so the morning draft keeps `## Overnight`. Try it first on a copy: `vault-nightly --vault <a clone> --no-route --quiet`.
 
+### Migrating your settings
+
+`~/.claude/settings.json` stops being a link to `claude-global/settings.json` and becomes a file built from it plus your own `claude-global/settings.overlay.json`. Your own rules and preferences move from the shared file into the overlay, once, on one machine:
+
+1. **Before pulling**, keep your current settings, edits included: `cp ~/claude-computer/claude-global/settings.json ~/settings-mine.json`.
+2. `template-pull <tag>`. If `claude-global/settings.json` conflicts, take the template's: `git checkout --theirs -- claude-global/settings.json && git add claude-global/settings.json`. From now on that file is the template's, and you never edit it.
+3. `settings-build --adopt --from ~/settings-mine.json` writes `claude-global/settings.overlay.json`: every rule you added, every template rule you took out, every preference you set. Give each removal a real `why` in place of the placeholder; move rules for one project's own commands (a deploy, a migration) into that project's `.claude/settings.json`; then `settings-build --print` and compare with `~/settings-mine.json`.
+4. Commit the template's `settings.json` and your overlay together.
+5. **On every machine**, after `git pull`: `settings-build --replace-link`, then `map-check --only settings`. Until then that machine runs the template's rules alone, which only ask more.
+
+From then on, change your settings in the overlay and run `settings-build`. Something Claude Code changes in `~/.claude/settings.json` ("don't ask again", `/config`, `/model`) shows up in `map-check`; `settings-build --adopt` keeps it, `--force` drops it.
+
 ### Added
 
 - **The vault's memory graph.** Two layers: `notes/` and `daily/` are yours; `memory/` is Claude's graph of people, orgs, meetings, decisions, commitments, topics and projects, built only from evidence in `sources/`, every fact a cited log line. The schema is the vault's `CLAUDE.md` (Properties, Rules, Jobs, Projects); `Home.md` has live views of open commitments, recent meetings and people; new `_templates/` for each type. `/transcripts` turns a recording into a meeting note with its people, decisions and commitments; `/inbox` files your own thinking into `notes/` and material from elsewhere into `sources/`.
@@ -25,16 +37,19 @@ The vault's layout changes: `people/` and `projects/` at the root move into `mem
 - **`bin/project-import`** snapshots a GitHub repo into `sources/repos/<repo>.md` through `gh api` (metadata, languages, commits, file tree, README, CLAUDE.md, DECISIONS.md; no clone), and `--catalogue` lists every repo with a proposed tier — hub, catalogue row or skip — by your own commits. Project hubs are keyed by repo and outlive the checkout.
 - **`bin/commitments`** lists open commitments, yours first, and closes or reopens one with your word as the evidence (a dated `sources/confirmations/` note).
 - **`bin/vault-nightly`**, the night shift (`schedule install vault-nightly`, 04:30): `claude -p '/inbox nightly'` files transcripts and captures and writes a few project hubs, in a git worktree of the vault, with `--permission-mode dontAsk` and a short tool list; it lands only past a gate (`vault-lint` clean, nothing deleted outside `inbox/`, nothing uncommitted), routes tasks to other brains through a file it validates, and reports under `## Overnight` in the next daily note. A failed run leaves the vault untouched and says so.
+- **`bin/settings-build`** builds `~/.claude/settings.json` from the template's `claude-global/settings.json` and the instance's `settings.overlay.json` (rules to add, rules to remove with a reason, keys to set or unset; `claude-global/settings.overlay.example.json` shows the shape). It won't remove a deny rule or an ask rule that guards secrets. `--check` tells an edit made in `~/.claude/settings.json` from a build that is out of date; `--adopt` folds those edits into the overlay; `--adopt --from <file>` turns a whole settings file into one. `map-check` gains a `settings` check, and `tests/settings-build.sh` runs in CI.
 - `tests/vault-lint.sh`, `tests/project-import.sh`, `tests/tasks-sync.sh`, `tests/vault-nightly.sh` and `tests/commitments.sh` run offline in CI (fixtures, recorded GitHub responses, a stand-in `claude`).
 
 ### Changed
 
 - **`tasks-sync` writes hubs in `memory/projects/`** (a hub for every brain with a GitHub remote, created if missing), and `maps/tasks.md` shows only what needs eyes: Unassigned, overdue, Now, and one line per brain. A hub whose checkout has gone gets its Tasks block frozen and is listed under "Hubs to close" for `/review`; a damaged block heals on the next run.
+- `/setup` builds `~/.claude/settings.json` with `settings-build` instead of linking it, and folds a settings file you already have into your overlay.
 - **`rclone` asks only for what writes.** `Bash(rclone:*)` on the ask list becomes one ask per verb that writes, configures or serves (copy, sync, bisync, move, delete, purge, mkdir, config, serve, mount, rc, link, backend, selfupdate, authorize and the rest), plus `Bash(rclone -*)` for a flag before the verb, which the per-verb rules can't see. Listings (`lsf`, `lsjson`, `lsl`, `size`, `check`) are allowed, as are `vault-lint`, `gmail search`, `gmail get`, `shellcheck`, `launchctl list` and `defaults read`. `rclone.conf` stays denied to `Read`.
 - `/archive` and `/graduate` close or update the project's hub (a fresh snapshot, `status`, `ended`, the Tasks block frozen); `/today` keeps the night shift's `## Overnight`; `schedule`'s daily note keeps it too.
 
 ### Fixed
 
+- **Turning the rm-guard hook off.** The docs said `CC_RM_GUARD=off` in `~/.claude/settings.local.json`; Claude Code reads `settings.local.json` only inside a project's `.claude/`, so that never worked. Set it as `env` in the settings overlay (every machine) or export it in `~/.zshrc.local` (one machine, sessions started from a terminal).
 - **`vault-setup` restores what a fresh clone of the vault is missing, and never deletes a plugin's settings.** The vault commits each plugin's `manifest.json` and `data.json` but ignores its code, so on a second machine every plugin looked "already installed" with no `main.js` and Obsidian loaded nothing. A plugin now counts as installed only when its code is there. Every id in `.obsidian/community-plugins.json` with a committed manifest — not just obsidian-git, dataview and templater — gets the code for that manifest's version (the release tagged `<v>` or `v<v>`, else the latest, said so), and the committed manifest is kept. The theme named in `appearance.json` is fetched from Obsidian's theme registry when its `theme.css` is missing. Files are moved into the plugin's folder one by one, so `--upgrade` no longer deletes `data.json`, as it did. `tests/vault-setup.sh` covers the fresh clone, the theme and settings across `--upgrade`.
 
 ## [0.6.0] — 2026-10-13

@@ -1,0 +1,27 @@
+{
+  "$comment": "Copy to settings.overlay.json and make it yours; `settings-build` combines it with settings.json (the template's) into ~/.claude/settings.json. The template never ships or changes settings.overlay.json. Run `settings-build --help` for the format.",
+  "set": {
+    "theme": "dark",
+    "env": {
+      "EDITOR": "code --wait"
+    }
+  },
+  "unset": [],
+  "allow": {
+    "add": [
+      "Bash(git checkout:*)"
+    ]
+  },
+  "ask": {
+    "add": [],
+    "remove": [
+      {
+        "rule": "Bash(brew uninstall:*)",
+        "why": "an example: say why this machine needn't ask"
+      }
+    ]
+  },
+  "deny": {
+    "add": []
+  }
+}

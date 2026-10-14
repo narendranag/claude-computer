@@ -15,6 +15,8 @@ Compares, for this host:
                RIPGREP_CONFIG_PATH pointing at it — otherwise every agent's `rg` runs unconfigured
   agent-reach  installed from the commit pinned in setup-tools.sh, yt-dlp and mcporter on PATH, the skill
                in ~/.claude/skills, and `agent-reach doctor --json` for the zero-config channels
+  settings     ~/.claude/settings.json is what `settings-build` makes from claude-global/settings.json and
+               settings.overlay.json: an edit made there (by Claude Code or by hand) or a pending build is drift
   secrets      this machine's age key matches the age_recipient in its machine file, .sops.yaml matches
                the machine files and secrets/backup.pub, and the store is encrypted to exactly those
                (no `secrets admit`/`revoke` pending) — names and metadata only, nothing is decrypted
@@ -27,7 +29,7 @@ entries deliberately not installed on this host, so they are not "missing".
 Either is drift: fix the machine or fix the map, in the same session.
 
 Usage:
-  map-check [--host NAME] [--only brew,vscode,launchd,ports,macparakeet,ripgrep,agent-reach,secrets,security]
+  map-check [--host NAME] [--only brew,vscode,launchd,ports,macparakeet,ripgrep,agent-reach,secrets,settings,security]
 
 Exit codes: 0 no drift · 1 drift or a security FAIL · 2 usage · 5 no machine file
 """
@@ -46,7 +48,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LAYER_FILES = {"base": "Brewfile", "dev": "Brewfile.dev", "server": "Brewfile.server"}
-CHECKS = ("brew", "vscode", "launchd", "ports", "macparakeet", "ripgrep", "agent-reach", "secrets", "security")
+CHECKS = ("brew", "vscode", "launchd", "ports", "macparakeet", "ripgrep", "agent-reach", "secrets", "settings", "security")
 # The channels setup-tools.sh installs. doctor reports github and exa_search as "warn" when they
 # are configured, because it won't make the live call that would prove them; that is not drift.
 AGENT_REACH_CORE = ("web", "youtube", "rss", "github", "exa_search")
@@ -291,6 +293,16 @@ def check_agent_reach() -> list[str]:
     return out
 
 
+def check_settings() -> list[str]:
+    r = subprocess.run([str(ROOT / "bin" / "settings-build"), "--check"], capture_output=True, text=True, check=False)
+    if r.returncode == 0:
+        return []
+    text = (r.stdout + r.stderr).splitlines()
+    changes = [l.strip() for l in text if l.strip()[:2] in ("+ ", "- ", "~ ")]
+    first = next((l.removeprefix("settings-build: ") for l in text if "note:" not in l), "")
+    return changes or [first or f"settings-build --check exited {r.returncode}"]
+
+
 def check_secrets(fm: dict[str, str | list[str]]) -> list[str]:
     store = ROOT / "secrets" / "secrets.yaml"
     if not store.is_file() and not (ROOT / ".sops.yaml").is_file():
@@ -351,6 +363,7 @@ def main() -> int:
         "ripgrep": check_ripgrep,
         "agent-reach": check_agent_reach,
         "secrets": lambda: check_secrets(fm),
+        "settings": check_settings,
     }
     print(f"[{host}] map-check against docs/machines/{host}.md")
     for name in only:
