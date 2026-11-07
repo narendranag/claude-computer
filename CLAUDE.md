@@ -29,6 +29,7 @@ You are the operator for this user's machines. This repo is the shared brain for
 - **Nothing managed implicitly.** A machine not in `docs/FLEET.md` is out of scope until the user adds it.
 - **Deferred work goes in `TASKS.md` under `## Later`.** Do not lose it in conversation.
 - **Tell the user when you finish something long:** `bin/tg-send "<what>"`.
+- **Delegate to Sonnet and Haiku subagents** (owner's rule, 2026-11-07): work that can be delegated or run in parallel goes to a subagent with `model: "sonnet"` (building, editing, research, reviews) or `model: "haiku"` (mechanical lookups, searches, bulk reformatting). This session keeps the decisions, the conversation with the owner, and the review of what comes back. Detail: `~/claude-computer/claude-global/CLAUDE.md`.
 
 ## Where things are
 
