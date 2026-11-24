@@ -28,14 +28,14 @@ Set each when you first need it — nothing breaks until a wrapper that uses it 
 | `jina.api_key`                                                         | API key                                                                                               | `jina`                                                         |
 | `exa.api_key`                                                          | API key                                                                                               | `exa`                                                          |
 | `r2.access_key_id`, `r2.secret_access_key`, `r2.endpoint`, `r2.bucket` | an R2 API token and where it points (`https://<account-id>.r2.cloudflarestorage.com`)                 | `archive-*`, `camera-ingest`, `library-push`, `resources-sync` |
-| `r2-crypt.password`, `r2-crypt.salt`                                   | the two passwords of the rclone crypt over `~/family/resources`                                              | `resources-sync`                                               |
+| `r2-crypt.password`, `r2-crypt.salt`                                   | the two passwords of the rclone crypt over `~/resources`                                              | `resources-sync`                                               |
 | `google.credentials`, `google.token`                                   | the downloaded OAuth client `credentials.json` · the token, written by the first run                  | `gcal`, `gmail`, `gdrive`, `gtasks`                            |
 | `env.cloudflare_api_token`                                             | a Cloudflare API token with Zone Settings: Edit, only for `--fix`                                     | `https-check --fix`                                            |
 | `openai.api_key`, `google-maps.api_key`, `duffel.api_key`              | optional, for your own scripts                                                                        | `secrets exec`                                                 |
 | `posthog.<app>`                                                        | an app's PostHog project key                                                                          | apps, via `secrets env`/`exec`                                 |
 | `env.<variable>`                                                       | anything else, under its variable name lowercased — where `import-env` puts what it doesn't recognise | `secrets exec`, `secrets env`                                  |
 
-**Losing every machine key and both paper copies loses every secret** — including `r2-crypt`, without which `~/family/resources` in R2 cannot be decrypted. Run `secrets backup-verify` now and then to prove the paper still works.
+**Losing every machine key and both paper copies loses every secret** — including `r2-crypt`, without which `~/resources` in R2 cannot be decrypted. Run `secrets backup-verify` now and then to prove the paper still works.
 
 ## Setting a value
 
