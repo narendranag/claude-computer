@@ -16,7 +16,7 @@ Key names in `secrets.yaml` are plaintext; only the values are encrypted. That i
 ## Keys
 
 - **One age key per manager machine**, at `~/.config/sops/age/keys.txt` (directory 700, file 600), made by `secrets init`. It never leaves the machine and is never in a repo. Its public half is the `age_recipient:` line in that machine's `docs/machines/<host>.md`.
-- **One paper backup key**, made by `secrets backup-key` in a terminal: the private half is printed once for you to write down twice, on two sheets kept in two places; the public half goes to `backup.pub`. `secrets backup-verify` has you type it back and proves it opens the store. Losing every machine key and both sheets loses every secret, including the password that encrypts `~/resources` in R2.
+- **One paper backup key**, made by `secrets backup-key` in a terminal: the private half is printed once for you to write down twice, on two sheets kept in two places; the public half goes to `backup.pub`. `secrets backup-verify` has you type it back and proves it opens the store. Losing every machine key and both sheets loses every secret, including the password that encrypts `~/family/resources` in R2.
 - There is no unlock step. The key file is the credential; at rest it relies on FileVault (Linux: LUKS) and mode 600, so launchd jobs and hooks keep working unattended.
 
 ## Rules

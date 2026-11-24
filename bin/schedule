@@ -10,7 +10,7 @@
 #   tasks-sync       hourly           vault task copies
 #   capture          every 5 min      your Telegram messages to the bot + Gmail label `vault` → vault inbox/
 #                                     (one machine only: Telegram gives each message to the first that asks)
-#   resources-sync   hourly           encrypted two-way sync of ~/resources
+#   resources-sync   hourly           encrypted two-way sync of ~/family/resources
 #   feeds-sync       daily 06:00      reading digest
 #   daily-note       daily 06:30      draft today's note with `claude -p`, unattended: the vault is
 #                                     the working directory and --allowedTools is read/edit, `commitments

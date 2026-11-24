@@ -72,7 +72,7 @@ Paths holding logged-in state or personal data. Never committed, never synced by
 - `~/.config/browse/profiles/` — Playwright Chromium profiles with logged-in sessions (`browse --profile`); mode 700
 - `~/.config/sops/age/` — this machine's age key, which opens every secret in the store (mode 700/600)
 - `~/.agent-reach/` — Agent Reach config; `config.yaml` holds cookies and keys once a login channel is added (mode 600)
-- `~/resources/` — family documents (encrypted in R2)
+- `~/family/resources/` — family documents (encrypted in R2)
 - `~/Library/Application Support/MacParakeet/` — meeting recordings and transcripts
 
 ## Security baseline
